@@ -22,14 +22,20 @@ release=https://github.com/stablyai/orca/releases/download/v$version
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cache="$root/.cache/orca"
 dir="$cache/$version"
-# orca-server の CLI は `plugin test` の実行環境（resources/plugins/declarative/*.mjs）を
-# 自分の 4 階層上に探すが、orca-server には入っていない。同じ版の .deb から取り出して置く。
+# orca-server の CLI は `plugin test` の実行環境（*.mjs）と `plugin types` の型（*.d.ts）を
+# 自分の 4 階層上の resources/plugins/declarative に探すが、orca-server には入っていない。
+# 同じ版の .deb から取り出して置く。
 runtime="$cache/resources/plugins/declarative"
 
 fetch() {
   curl -fsSL --retry 3 -o "$2" "$release/$1"
   echo "$3  $2" | sha256sum -c - >/dev/null
 }
+
+# mise run check は test と build を並列に走らせるので、取ってくる間は 1 つずつにする。
+mkdir -p "$cache"
+exec 9>"$cache/.lock"
+flock 9
 
 if [ ! -x "$dir/bin/orca-ide" ]; then
   mkdir -p "$dir"
@@ -38,15 +44,17 @@ if [ ! -x "$dir/bin/orca-ide" ]; then
   rm -f "$dir.tar.gz"
 fi
 
-if [ ! -f "$runtime/orca-test-register.mjs" ] || [ "$(cat "$runtime/.version" 2>/dev/null)" != "$version" ]; then
+if [ "$(cat "$runtime/.version" 2>/dev/null)" != "$version" ]; then
   tmp=$(mktemp -d)
   fetch "orca-ide_${version}_amd64.deb" "$tmp/orca.deb" "$deb_sha256"
-  dpkg-deb --fsys-tarfile "$tmp/orca.deb" |
-    tar -x -C "$tmp" --wildcards '*/app.asar.unpacked/resources/plugins/declarative/*.mjs'
+  dpkg-deb --fsys-tarfile "$tmp/orca.deb" | tar -x -C "$tmp" --wildcards '*/plugins/declarative/*'
+  rm -rf "$runtime"
   mkdir -p "$runtime"
-  find "$tmp" -path '*/app.asar.unpacked/resources/plugins/declarative/*.mjs' -exec cp {} "$runtime/" \;
+  find "$tmp" -type f -path '*/plugins/declarative/*' \( -name '*.mjs' -o -name '*.d.ts' \) \
+    -exec cp {} "$runtime/" \;
   echo "$version" >"$runtime/.version"
   rm -rf "$tmp"
 fi
 
+exec 9>&-
 exec "$dir/bin/orca-ide" "$@"
