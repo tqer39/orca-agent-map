@@ -1,0 +1,30 @@
+[tools]
+node = "24.21.0"
+pnpm = "12.18.0"
+biome = "2.6.9"
+
+# 各タスクは package.json の scripts に委ね、検査内容は scripts 側で管理する。
+[tasks."repo:bootstrap"]
+# hooks と standards:* が使う .standards/cache の CLI は gitignore 対象なので、新規 clone でも用意する。
+depends = ["standards:install"]
+run = "pnpm install --frozen-lockfile --ignore-scripts"
+
+[tasks."standards:install"]
+description = "ロックに記録した版の dev-standards CLI をビルドし .standards/cache に配置する"
+tools = { go = "1.27.4" }
+run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.version is matching(pat="^[0-9]+[.][0-9]+[.][0-9]+$") %}go run github.com/tqer39/dev-standards/cmd/dev-standards@v{{ lock.version }} sync --repo .{% else %}exit 2{% endif %}"""
+
+[tasks."repo:lint"]
+run = "pnpm run lint"
+
+[tasks."repo:format"]
+run = "pnpm run format"
+
+[tasks."repo:format:check"]
+run = "pnpm run format:check"
+
+[tasks."repo:test"]
+run = "pnpm run test"
+
+[tasks."repo:build"]
+run = "pnpm run build"

@@ -1,0 +1,12 @@
+{
+  "name": "orca-agent-map",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "test": "node --test",
+    "build": "node -e \"console.log('ビルド対象はまだありません')\""
+  }
+}
