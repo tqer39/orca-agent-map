@@ -313,16 +313,27 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     };
   });
 
+  // 返事がどの依頼に付いたか（thread_id か payload.requestId）。
   const answered = new Set<string>();
+  const linked = new Set<string>();
   for (const m of raw.messages) {
-    if (m.thread_id) answered.add(m.thread_id);
     const requestId = payloadOf(m)?.requestId;
-    if (typeof requestId === "string") answered.add(requestId);
+    for (const link of [m.thread_id, requestId]) {
+      if (typeof link !== "string" || !link) continue;
+      answered.add(link);
+      linked.add(m.id);
+    }
   }
+  // どの依頼にも結び付いていないメッセージだけ、相手から後で来たものを返事とみなす。
+  // 別の依頼に結び付いた返事で、この依頼を閉じない。
   const repliedLater = (f: Flow) =>
     flows.some(
       (g) =>
-        g.from === f.to && g.to === f.from && g.at >= f.at && g.id !== f.id,
+        g.from === f.to &&
+        g.to === f.from &&
+        g.at >= f.at &&
+        g.id !== f.id &&
+        !linked.has(g.id),
     );
 
   for (const f of flows) {

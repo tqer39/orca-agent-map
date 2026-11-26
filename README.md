@@ -26,6 +26,8 @@ orca plugin install tqer39/orca-agent-map --json
 git clone https://github.com/tqer39/orca-agent-map.git
 cd orca-agent-map
 orca plugin dev load . --json   # 承認の内容と --approve 付きのコマンドが返る
+# 返ってきた承認の内容を確かめてから、そのコマンドを実行する
+orca plugin dev load . --json --approve <fingerprint>
 orca plugin open local.agent-map --panel agent-map
 ```
 

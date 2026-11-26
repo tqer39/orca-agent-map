@@ -212,3 +212,18 @@ test("ボット名の付いた worker の worktree も worker のノードとし
   assert.deepEqual([b?.label, b?.kind], ["builder-b", "worker"]);
   assert.equal(s.nodes.filter((n) => n.label === "Concierge").length, 1);
 });
+
+test("別の依頼に結び付いた返事では、この依頼を閉じない", () => {
+  const raw = demoSources(NOW);
+  raw.messages.push({
+    id: "msg_demo_97",
+    type: "status",
+    from_handle: `orca_session_id:${ids.planner}`,
+    to_handle: `orca_session_id:${ids.builderA}`,
+    subject: "前の件の返事",
+    created_at: new Date(NOW - 1000).toISOString(),
+    thread_id: "msg_demo_00",
+  });
+  const s = buildSnapshot(raw, NOW);
+  assert.ok(s.inFlight.some((f) => f.id === "msg_demo_02"));
+});

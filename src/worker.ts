@@ -50,8 +50,10 @@ function execJson(file: string, args: string[]): Promise<unknown> {
 export function cliRunner(configuredPath: string): RunCli {
   let file = configuredPath || "orca";
   return async (args) => {
+    // 並列の呼び出しが途中で file を替えても、失敗した呼び出しが使った実行ファイルで判断する。
+    const used = file;
     try {
-      return await execJson(file, args);
+      return await execJson(used, args);
     } catch (error) {
       // Finder から起動した Orca の PATH には orca が無いことがある。
       const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -59,11 +61,11 @@ export function cliRunner(configuredPath: string): RunCli {
         !missing ||
         configuredPath ||
         process.platform !== "darwin" ||
-        file === MAC_ORCA
+        used === MAC_ORCA
       )
         throw error;
       file = MAC_ORCA;
-      return execJson(file, args);
+      return execJson(MAC_ORCA, args);
     }
   };
 }

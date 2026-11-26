@@ -46,6 +46,8 @@ fi
 
 if [ "$(cat "$plugins/.version" 2>/dev/null)" != "$version" ]; then
   tmp=$(mktemp -d)
+  # 取得や展開に失敗して途中で抜けても、取ってきたものを残さない。
+  trap 'rm -rf "$tmp"' EXIT
   fetch "orca-ide_${version}_amd64.deb" "$tmp/orca.deb" "$deb_sha256"
   dpkg-deb --fsys-tarfile "$tmp/orca.deb" |
     tar -x -C "$tmp" --wildcards '*/plugins/declarative/*' '*/plugins/types/*'
@@ -56,6 +58,7 @@ if [ "$(cat "$plugins/.version" 2>/dev/null)" != "$version" ]; then
   done
   echo "$version" >"$plugins/.version"
   rm -rf "$tmp"
+  trap - EXIT
 fi
 
 exec 9>&-
