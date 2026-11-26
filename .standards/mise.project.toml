@@ -1,0 +1,23 @@
+[tools]
+node = "24.21.0"
+pnpm = "12.18.0"
+biome = "2.6.9"
+
+# 各タスクは package.json の scripts に委ね、検査内容は scripts 側で管理する。
+[tasks."repo:bootstrap"]
+run = "pnpm install --frozen-lockfile --ignore-scripts"
+
+[tasks."repo:lint"]
+run = "pnpm run lint"
+
+[tasks."repo:format"]
+run = "pnpm run format"
+
+[tasks."repo:format:check"]
+run = "pnpm run format:check"
+
+[tasks."repo:test"]
+run = "pnpm run test"
+
+[tasks."repo:build"]
+run = "pnpm run build"
