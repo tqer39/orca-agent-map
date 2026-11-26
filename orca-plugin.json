@@ -1,0 +1,62 @@
+{
+  "manifestVersion": 2,
+  "id": "agent-map",
+  "name": "Agent Map",
+  "version": "0.1.0",
+  "description": "ボット・エージェント・worker の間の依頼（handoff / question / status / worker）をリアルタイムに描く相関パネル。",
+  "repository": "https://github.com/tqer39/orca-agent-map",
+  "license": "MIT",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "agent-map",
+        "title": "Agent Map",
+        "icon": "activity",
+        "entry": "panel/index.html"
+      }
+    ],
+    "settings": [
+      {
+        "key": "refreshSeconds",
+        "title": "更新間隔（秒）",
+        "description": "パネルが見えている間、この間隔で Orca の情報を読み直す。",
+        "type": "integer",
+        "default": 5,
+        "minimum": 2,
+        "maximum": 60
+      },
+      {
+        "key": "masked",
+        "title": "件名を伏せる（Masked）",
+        "description": "パネルの Masked トグルと同じ。画面共有のときに件名を隠す。",
+        "type": "boolean",
+        "default": false
+      },
+      {
+        "key": "orcaPath",
+        "title": "orca CLI のパス",
+        "description": "空なら PATH の orca、見つからなければ macOS の標準の場所を使う。",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "key": "demo",
+        "title": "デモデータを表示",
+        "description": "Orca の情報の代わりにダミーデータを描く（スクリーンショット用）。",
+        "type": "boolean",
+        "default": false
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    }
+  ]
+}
