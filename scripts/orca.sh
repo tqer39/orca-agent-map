@@ -22,10 +22,10 @@ release=https://github.com/stablyai/orca/releases/download/v$version
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cache="$root/.cache/orca"
 dir="$cache/$version"
-# orca-server の CLI は `plugin test` の実行環境（*.mjs）と `plugin types` の型（*.d.ts）を
-# 自分の 4 階層上の resources/plugins/declarative に探すが、orca-server には入っていない。
-# 同じ版の .deb から取り出して置く。
-runtime="$cache/resources/plugins/declarative"
+# orca-server の CLI は `plugin test` の実行環境（declarative/*.mjs）と `plugin types` の型
+# （declarative/*.d.ts、types/*.d.ts）を自分の 4 階層上の resources/plugins に探すが、
+# orca-server には入っていない。同じ版の .deb から取り出して置く。
+plugins="$cache/resources/plugins"
 
 fetch() {
   curl -fsSL --retry 3 -o "$2" "$release/$1"
@@ -44,15 +44,17 @@ if [ ! -x "$dir/bin/orca-ide" ]; then
   rm -f "$dir.tar.gz"
 fi
 
-if [ "$(cat "$runtime/.version" 2>/dev/null)" != "$version" ]; then
+if [ "$(cat "$plugins/.version" 2>/dev/null)" != "$version" ]; then
   tmp=$(mktemp -d)
   fetch "orca-ide_${version}_amd64.deb" "$tmp/orca.deb" "$deb_sha256"
-  dpkg-deb --fsys-tarfile "$tmp/orca.deb" | tar -x -C "$tmp" --wildcards '*/plugins/declarative/*'
-  rm -rf "$runtime"
-  mkdir -p "$runtime"
-  find "$tmp" -type f -path '*/plugins/declarative/*' \( -name '*.mjs' -o -name '*.d.ts' \) \
-    -exec cp {} "$runtime/" \;
-  echo "$version" >"$runtime/.version"
+  dpkg-deb --fsys-tarfile "$tmp/orca.deb" |
+    tar -x -C "$tmp" --wildcards '*/plugins/declarative/*' '*/plugins/types/*'
+  rm -rf "$plugins"
+  for sub in declarative types; do
+    mkdir -p "$plugins/$sub"
+    find "$tmp" -type f -path "*/resources/plugins/$sub/*" -exec cp {} "$plugins/$sub/" \;
+  done
+  echo "$version" >"$plugins/.version"
   rm -rf "$tmp"
 fi
 
