@@ -226,3 +226,5 @@ $RECYCLE.BIN/
 !.env.example
 
 # リポジトリ固有の設定
+# Orca が plugin types で作る型（再生成できる）
+.orca/

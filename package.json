@@ -6,7 +6,11 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "test": "node --test",
-    "build": "node -e \"console.log('ビルド対象はまだありません')\""
+    "test": "sh scripts/orca.sh plugin validate . && sh scripts/orca.sh plugin test . && sh scripts/orca.sh plugin check .",
+    "build": "sh scripts/orca.sh plugin types . && tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2"
   }
 }

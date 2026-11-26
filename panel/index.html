@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --c-handoff: #2563eb;
+        --c-question: #9333ea;
+        --c-status: #0f766e;
+        --c-worker: #c2410c;
+        --c-escalation: #dc2626;
+        --c-working: #15803d;
+        --c-waiting: #b45309;
+        --c-blocked: #dc2626;
+        --c-idle: #9ca3af;
+        --c-needs: #e11d48;
+        --c-needs-fg: #ffffff;
+      }
+      html.dark {
+        --c-handoff: #60a5fa;
+        --c-question: #c084fc;
+        --c-status: #2dd4bf;
+        --c-worker: #fb923c;
+        --c-escalation: #f87171;
+        --c-working: #4ade80;
+        --c-waiting: #fbbf24;
+        --c-blocked: #f87171;
+        --c-idle: #6b7280;
+        --c-needs: #fb7185;
+        --c-needs-fg: #1f0a10;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 10px 12px 16px;
+        font: 12px/1.45 var(--orca-font-sans, system-ui, sans-serif);
+        color: var(--orca-foreground);
+        background: var(--orca-background);
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .pill {
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        border: 1px solid var(--orca-border);
+        color: var(--orca-muted-foreground);
+        white-space: nowrap;
+      }
+      #live.on {
+        color: var(--c-working);
+        border-color: var(--c-working);
+      }
+      #needs {
+        color: var(--c-needs-fg);
+        background: var(--c-needs);
+        border-color: var(--c-needs);
+        font-weight: 600;
+      }
+      #demo {
+        color: var(--c-waiting);
+        border-color: var(--c-waiting);
+      }
+      button {
+        font: inherit;
+        font-size: 11px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--orca-border);
+        background: transparent;
+        color: var(--orca-muted-foreground);
+        cursor: pointer;
+      }
+      button[aria-pressed='true'] {
+        background: var(--orca-accent);
+        color: var(--orca-accent-foreground);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--orca-ring);
+        outline-offset: 1px;
+      }
+      #graph {
+        border: 1px solid var(--orca-border);
+        border-radius: var(--orca-radius, 8px);
+        background: var(--orca-card);
+        min-height: 44px;
+        overflow: hidden;
+      }
+      svg.graph {
+        display: block;
+      }
+      .node rect {
+        fill: var(--orca-background);
+        stroke: var(--orca-border);
+      }
+      .node.bot rect {
+        stroke: var(--orca-muted-foreground);
+      }
+      .node text {
+        fill: var(--orca-card-foreground);
+        font-size: 11px;
+      }
+      .dot {
+        fill: var(--c-idle);
+      }
+      .node.needs rect {
+        stroke: var(--c-needs);
+        stroke-width: 2;
+        animation: blink 2.4s ease-in-out infinite;
+      }
+      .needs-mark {
+        fill: var(--c-needs);
+      }
+      .needs-glyph {
+        fill: var(--c-needs-fg);
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .dot.working {
+        fill: var(--c-working);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      .dot.waiting {
+        fill: var(--c-waiting);
+      }
+      .dot.blocked {
+        fill: var(--c-blocked);
+      }
+      .edge {
+        fill: none;
+        stroke-width: 1.5;
+        opacity: 0.45;
+      }
+      .edge.live {
+        opacity: 1;
+        stroke-dasharray: 5 4;
+        animation: flow 0.9s linear infinite;
+      }
+      .edge.handoff { stroke: var(--c-handoff); }
+      .edge.question { stroke: var(--c-question); }
+      .edge.status { stroke: var(--c-status); }
+      .edge.worker { stroke: var(--c-worker); }
+      .edge.escalation { stroke: var(--c-escalation); }
+      .arrow.handoff path { fill: var(--c-handoff); }
+      .arrow.question path { fill: var(--c-question); }
+      .arrow.status path { fill: var(--c-status); }
+      .arrow.worker path { fill: var(--c-worker); }
+      .arrow.escalation path { fill: var(--c-escalation); }
+      @keyframes flow {
+        to {
+          stroke-dashoffset: -18;
+        }
+      }
+      @keyframes blink {
+        50% {
+          stroke-opacity: 0.25;
+        }
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .edge.live,
+        .dot.working,
+        .node.needs rect {
+          animation: none;
+        }
+      }
+      section {
+        margin-top: 12px;
+      }
+      h2 {
+        margin: 0 0 4px;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        color: var(--orca-muted-foreground);
+      }
+      .count {
+        margin-left: 6px;
+        font-weight: 400;
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .row {
+        padding: 5px 0;
+        border-top: 1px solid var(--orca-border);
+      }
+      .row.live .route::before {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--c-working);
+        margin-right: 6px;
+        flex: none;
+      }
+      .route {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .who {
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 34%;
+      }
+      .to {
+        color: var(--orca-muted-foreground);
+      }
+      .kind {
+        margin-left: auto;
+        font-size: 10px;
+        padding: 0 6px;
+        border-radius: 4px;
+        border: 1px solid currentColor;
+        white-space: nowrap;
+      }
+      .kind.handoff { color: var(--c-handoff); }
+      .kind.question { color: var(--c-question); }
+      .kind.status { color: var(--c-status); }
+      .kind.worker { color: var(--c-worker); }
+      .kind.escalation { color: var(--c-escalation); }
+      .needs-icon {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--c-needs);
+        color: var(--c-needs-fg);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 14px;
+        text-align: center;
+      }
+      .kind.needs {
+        color: var(--c-needs);
+        font-weight: 600;
+      }
+      time {
+        color: var(--orca-muted-foreground);
+        font-size: 10px;
+        min-width: 24px;
+        text-align: right;
+      }
+      .subject {
+        color: var(--orca-muted-foreground);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .subject.masked {
+        letter-spacing: 0.1em;
+      }
+      .empty {
+        margin: 6px 0;
+        color: var(--orca-muted-foreground);
+      }
+      #graph .empty {
+        padding: 6px 10px;
+      }
+      .error {
+        margin-top: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--orca-destructive);
+        color: var(--orca-destructive);
+        overflow-wrap: anywhere;
+      }
+      .error ul {
+        margin: 2px 0 0;
+        padding-left: 16px;
+        list-style: disc;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Agent Map</h1>
+      <span id="demo" class="pill" hidden>demo</span>
+      <span id="needs" class="pill" hidden></span>
+      <span id="live" class="pill">0 live</span>
+      <button id="mask" type="button" aria-pressed="false" title="件名を伏せる">Masked</button>
+    </header>
+    <div id="graph"><p class="empty">読み込み中…</p></div>
+    <div id="errors"></div>
+    <div id="lists"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
