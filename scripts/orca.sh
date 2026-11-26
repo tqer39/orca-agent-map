@@ -1,32 +1,52 @@
 #!/bin/sh
-# orca CLI を呼ぶ。PATH に orca があればそれを使い、無ければ（CI の Linux など）
-# 公式リリースの orca-server を .cache/orca に取ってきて、その CLI を使う。
+# orca CLI を呼ぶ。PATH に orca があればそれを使い、無ければ（CI の Linux）公式リリースから
+# 取ってきて .cache/orca に置く。どちらのファイルも SHA-256 を確かめてから使う。
 set -eu
 
 if command -v orca >/dev/null 2>&1; then
   exec orca "$@"
 fi
 
-# 版を上げるときは https://github.com/stablyai/orca/releases の orca-server-sha256sums.txt の値も替える。
+if [ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]; then
+  echo "orca CLI が見つかりません。Orca をインストールして orca を PATH に入れてください。" >&2
+  exit 1
+fi
+
+# 版を上げるときは、リリースの各ファイルの sha256 も替える
+# （gh api repos/stablyai/orca/releases/tags/v<版> --jq '.assets[] | [.name, .digest]'）。
 version=1.4.278
-case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) arch=x64 sha256=de38855fb18c7d641c9abb2a862b3f7325b7d75230daedcde1f48d2407130f9d ;;
-  Linux-aarch64) arch=arm64 sha256=3b2480eb6ed7aa1e7021c96d089304ca714783bd23b3c2e20ee515bf8e49f6a0 ;;
-  *)
-    echo "orca CLI が見つかりません。Orca をインストールして orca を PATH に入れてください。" >&2
-    exit 1
-    ;;
-esac
+server_sha256=de38855fb18c7d641c9abb2a862b3f7325b7d75230daedcde1f48d2407130f9d
+deb_sha256=d2503e0cfcf32a0ddc928a5c943ea7dc6d7c2fde749b59ba18719f7a001fb84f
+release=https://github.com/stablyai/orca/releases/download/v$version
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-dir="$root/.cache/orca/$version-$arch"
+cache="$root/.cache/orca"
+dir="$cache/$version"
+# orca-server の CLI は `plugin test` の実行環境（resources/plugins/declarative/*.mjs）を
+# 自分の 4 階層上に探すが、orca-server には入っていない。同じ版の .deb から取り出して置く。
+runtime="$cache/resources/plugins/declarative"
+
+fetch() {
+  curl -fsSL --retry 3 -o "$2" "$release/$1"
+  echo "$3  $2" | sha256sum -c - >/dev/null
+}
+
 if [ ! -x "$dir/bin/orca-ide" ]; then
   mkdir -p "$dir"
-  archive="$dir.tar.gz"
-  curl -fsSL -o "$archive" \
-    "https://github.com/stablyai/orca/releases/download/v$version/orca-server-linux-$arch.tar.gz"
-  echo "$sha256  $archive" | sha256sum -c - >/dev/null
-  tar -xzf "$archive" -C "$dir" --strip-components=1
-  rm -f "$archive"
+  fetch orca-server-linux-x64.tar.gz "$dir.tar.gz" "$server_sha256"
+  tar -xzf "$dir.tar.gz" -C "$dir" --strip-components=1
+  rm -f "$dir.tar.gz"
 fi
+
+if [ ! -f "$runtime/orca-test-register.mjs" ] || [ "$(cat "$runtime/.version" 2>/dev/null)" != "$version" ]; then
+  tmp=$(mktemp -d)
+  fetch "orca-ide_${version}_amd64.deb" "$tmp/orca.deb" "$deb_sha256"
+  dpkg-deb --fsys-tarfile "$tmp/orca.deb" |
+    tar -x -C "$tmp" --wildcards '*/app.asar.unpacked/resources/plugins/declarative/*.mjs'
+  mkdir -p "$runtime"
+  find "$tmp" -path '*/app.asar.unpacked/resources/plugins/declarative/*.mjs' -exec cp {} "$runtime/" \;
+  echo "$version" >"$runtime/.version"
+  rm -rf "$tmp"
+fi
+
 exec "$dir/bin/orca-ide" "$@"
