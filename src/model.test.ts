@@ -310,3 +310,62 @@ test("担当を決められない worker は、先頭のエージェントに結
     !s.nodes.some((n) => n.label === "coordinator" && n.kind === "worker"),
   );
 });
+
+test("終わった dispatch は担当キーで結び、ペインが消えた worker を残った worker に結ばない", () => {
+  const sid = (n: number) => `00000000-0000-4000-9000-00000000000${n}`;
+  const s = buildSnapshot(
+    {
+      messages: [],
+      bots: [],
+      items: [],
+      worktrees: [
+        {
+          worktreeId: "repo::shared",
+          agents: [
+            {
+              orcaSessionId: sid(1),
+              paneKey: "pane-c",
+              displayName: "coordinator",
+              state: "working",
+            },
+            // worker-b のペインは閉じていて、worker-a だけが残っている。
+            {
+              orcaSessionId: sid(2),
+              paneKey: "pane-a",
+              parentPaneKey: "pane-c",
+              displayName: "worker-a",
+              state: "done",
+              stateStartedAt: NOW - 60_000,
+            },
+          ],
+        },
+      ],
+      workers: [
+        {
+          dispatchId: "ctx_a",
+          workspace: "repo::shared",
+          outcome: "succeeded",
+          assigneePaneKey: "pane-a",
+        },
+        {
+          dispatchId: "ctx_b",
+          workspace: "repo::shared",
+          outcome: "succeeded",
+          assigneePaneKey: "pane-b",
+        },
+        // 担当を引けていない終わった dispatch も、残った worker に結ばない。
+        {
+          dispatchId: "ctx_c",
+          workspace: "repo::shared",
+          outcome: "succeeded",
+        },
+      ],
+    },
+    NOW,
+  );
+  const label = (id: string) => s.nodes.find((n) => n.id === id)?.label;
+  assert.deepEqual(
+    s.recent.map((f) => [f.id, label(f.from), label(f.to)]),
+    [["ctx_a", "coordinator", "worker-a"]],
+  );
+});

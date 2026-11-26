@@ -66,10 +66,11 @@ Orca の plugin API には orchestration の inbox や worker 一覧を読むメ
 | ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `nextCursor`                                                                                           |
 
 - inbox のセッション ID は `worktree ps` の `orcaSessionId` と突き合わせて名前にする。ボットの worktree のセッション（チャット）は、ボットごとに 1 つのノードにまとめる。
-- worker の担当エージェントは、`worker-show` の `assigneePaneKey`（含まれるセッション ID）で `ps` のエージェントと突き合わせる。coordinator や別の worker と同じ worktree に居ても取り違えない。dispatch の担当は変わらないので、引けた値は dispatch ごとに覚える。担当を決められない worker は出さない。
+- worker の担当エージェントは、`worker-show` の `assigneePaneKey`（含まれるセッション ID）で `ps` のエージェントと突き合わせる。coordinator や別の worker と同じ worktree に居ても取り違えない。引くのは走っている worker と、終わった worker のうち新しい 20 件。dispatch の担当は変わらないので、引けた値は dispatch ごとに覚え、終わった後も使う。担当を引けていない worker は推測で結ばず、出さない。
 - worker の依頼元は、worker のエージェントの `parentPaneKey` が指すペインのエージェント。
 - `ps` に居ない送り手は、`payload.botRequest.from` にボット名があればそれを、無ければセッション ID の先頭 6 文字を出す。
 - ボットの一覧と Item はボットの数だけ CLI を呼ぶので、15 秒のあいだ使い回す。
+- Item はボットごとに最大 50 ページ（5000 件）まで読む。上限を超えて続きがあるときや、カーソルが繰り返されたときは、読めた分を出したうえで「更新できませんでした」の欄に未取得があることを出す。
 - `orca` は PATH から探し、見つからなければ macOS の `/Applications/Orca.app/Contents/Resources/bin/orca` を使う。設定の「orca CLI のパス」で変えられる。
 
 ### 取れないもの・できないこと

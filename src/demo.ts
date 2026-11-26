@@ -77,18 +77,21 @@ export function demoSources(now: number): RawSources {
         taskId: "task_demo_a",
         workspace: "repo::demo-a",
         outcome: "in_progress",
+        assigneePaneKey: "pane-4",
       },
       {
         dispatchId: "ctx_demo_b",
         taskId: "task_demo_b",
         workspace: "repo::demo-b",
         outcome: "in_progress",
+        assigneePaneKey: "pane-5",
       },
       {
         dispatchId: "ctx_demo_c",
         taskId: "task_demo_c",
         workspace: "repo::demo-c",
         outcome: "succeeded",
+        assigneePaneKey: "pane-6",
       },
     ],
     worktrees: [

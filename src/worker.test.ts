@@ -21,13 +21,16 @@ function fakeCli(
     calls.push(args);
     if (fail.has(args[1])) throw new Error("not reachable");
     if (args[1] === "inbox") return { messages: raw.messages };
-    if (args[1] === "worker-list") return { workers: raw.workers };
+    // 本物の worker-list と同じく、担当の paneKey は付けずに返す。
+    if (args[1] === "worker-list")
+      return {
+        workers: raw.workers.map(({ assigneePaneKey: _, ...w }) => w),
+      };
     if (args[0] === "worktree") return { worktrees: raw.worktrees };
     if (args[1] === "list") return { bots: raw.bots.map((name) => ({ name })) };
     if (args[1] === "worker-show") {
       const w = raw.workers.find((x) => x.dispatchId === args[3]);
-      const wt = raw.worktrees.find((t) => t.worktreeId === w?.workspace);
-      return { dispatch: { assigneePaneKey: wt?.agents?.[0]?.paneKey } };
+      return { dispatch: { assigneePaneKey: w?.assigneePaneKey } };
     }
     const bot = args[args.indexOf("--bot") + 1];
     return {
@@ -106,23 +109,23 @@ test("ボットの一覧と Item は 15 秒のあいだ読み直さない", asyn
   assert.equal(calls, 4);
 });
 
-test("走っている worker の担当は worker-show で引き、dispatch ごとに覚える", async () => {
+test("worker の担当は worker-show で引き、dispatch ごとに覚える", async () => {
   const calls: string[][] = [];
   const read = workersReader(fakeCli(calls));
   const first = await read();
   const shown = () =>
     calls.filter((c) => c[1] === "worker-show").map((c) => c[3]);
-  assert.deepEqual(shown().sort(), ["ctx_demo_a", "ctx_demo_b"]);
+  assert.deepEqual(shown().sort(), ["ctx_demo_a", "ctx_demo_b", "ctx_demo_c"]);
   assert.deepEqual(
     first.workers.map((w) => [w.dispatchId, w.assigneePaneKey]),
     [
       ["ctx_demo_a", "pane-4"],
       ["ctx_demo_b", "pane-5"],
-      ["ctx_demo_c", undefined],
+      ["ctx_demo_c", "pane-6"],
     ],
   );
   await read();
-  assert.equal(shown().length, 2);
+  assert.equal(shown().length, 3);
 });
 
 test("worker-show に失敗しても worker-list は描き、次の更新で引き直す", async () => {
@@ -153,13 +156,128 @@ test("Needs you の Item は nextCursor を辿って全ページ読む", async (
     },
     p2: { items: [{ number: 101 }, { number: 102 }] },
   };
-  const items = await needsYouItems(async (args) => {
+  const { items, incomplete } = await needsYouItems(async (args) => {
     calls.push(args);
     const i = args.indexOf("--cursor");
     return pages[i < 0 ? "" : args[i + 1]];
   }, "Scheduler");
+  assert.equal(incomplete, undefined);
   assert.equal(items.length, 102);
   assert.deepEqual(items[101], { number: 102, bot: "Scheduler" });
   assert.deepEqual(calls[1].slice(-2), ["--cursor", "p2"]);
   assert.ok(calls[0].includes("--limit"));
+});
+
+/** 終わった worker を、worker-show を引かない位置（21 件目以降）に置いた worker-list。 */
+function workerListWith(outcome: string, liveness: string) {
+  const older = Array.from({ length: 20 }, (_, i) => ({
+    dispatchId: `ctx_old_${i}`,
+    workspace: "repo::old",
+    outcome: "succeeded",
+  }));
+  return {
+    workers: [
+      ...older,
+      { dispatchId: "ctx_x", workspace: "repo::shared", outcome, liveness },
+    ],
+  };
+}
+
+test("走っている間に引いた担当は、終わった後も使う", async () => {
+  let state: [string, string] = ["in_progress", "live"];
+  const shown: string[] = [];
+  const read = workersReader(async (args) => {
+    if (args[1] === "worker-list") return workerListWith(...state);
+    shown.push(args[3]);
+    return {
+      dispatch: { assigneePaneKey: args[3] === "ctx_x" ? "pane-x" : null },
+    };
+  });
+  await read();
+  state = ["succeeded", "exited"];
+  const after = await read();
+  assert.equal(after.workers.at(-1)?.assigneePaneKey, "pane-x");
+  assert.equal(shown.filter((id) => id === "ctx_x").length, 1);
+});
+
+test("一覧から消えた dispatch の担当は忘れる", async () => {
+  let listed = true;
+  const shown: string[] = [];
+  const read = workersReader(async (args) => {
+    if (args[1] === "worker-list")
+      return listed ? workerListWith("in_progress", "live") : { workers: [] };
+    shown.push(args[3]);
+    return { dispatch: { assigneePaneKey: "pane-x" } };
+  });
+  await read();
+  listed = false;
+  await read();
+  listed = true;
+  await read();
+  assert.equal(shown.filter((id) => id === "ctx_x").length, 2);
+});
+
+/** ページごとに決まった応答を返す偽の CLI。 */
+function pagedCli(next: (cursor: string | undefined) => string | undefined) {
+  const calls: (string | undefined)[] = [];
+  const run: RunCli = async (args) => {
+    const i = args.indexOf("--cursor");
+    const cursor = i < 0 ? undefined : args[i + 1];
+    calls.push(cursor);
+    return { items: [{ number: calls.length }], nextCursor: next(cursor) };
+  };
+  return { run, calls };
+}
+
+test("ページの上限に達しても続きがあれば、未取得ありとして返す", async () => {
+  let n = 0;
+  const { run, calls } = pagedCli(() => `c${++n}`);
+  const result = await needsYouItems(run, "Scheduler");
+  assert.equal(calls.length, 50);
+  assert.equal(result.items.length, 50);
+  assert.match(result.incomplete ?? "", /50 ページを超えた/);
+});
+
+test("同じカーソルが続けて返ったら止め、未取得ありとして返す", async () => {
+  const { run, calls } = pagedCli(() => "same");
+  const result = await needsYouItems(run, "Scheduler");
+  assert.deepEqual(calls, [undefined, "same"]);
+  assert.equal(result.items.length, 2);
+  assert.match(result.incomplete ?? "", /繰り返された/);
+});
+
+test("カーソルが A → B → A と巡ったら、同じページを読み直さずに止める", async () => {
+  const { run, calls } = pagedCli((c) => (c === "A" ? "B" : "A"));
+  const result = await needsYouItems(run, "Scheduler");
+  assert.deepEqual(calls, [undefined, "A", "B"]);
+  assert.equal(result.items.length, 3);
+  assert.match(result.incomplete ?? "", /繰り返された/);
+});
+
+test("途中のページで失敗したら、ボットの取得の失敗として伝える", async () => {
+  const run: RunCli = async (args) => {
+    if (args.includes("--cursor")) throw new Error("timeout");
+    return { items: [{ number: 1 }], nextCursor: "p2" };
+  };
+  await assert.rejects(needsYouItems(run, "Scheduler"), /timeout/);
+});
+
+test("未取得のある Item は読めた分を出し、errors にも載せる", async () => {
+  let n = 0;
+  const run: RunCli = async (args) => {
+    if (args[1] === "list" && args[0] === "bot")
+      return { bots: [{ name: "Scheduler" }] };
+    if (args[1] === "item")
+      return {
+        items: [{ number: ++n, status: "needs_you", title: `t${n}` }],
+        nextCursor: `c${n}`,
+      };
+    if (args[1] === "inbox") return { messages: [] };
+    if (args[1] === "worker-list") return { workers: [] };
+    return { worktrees: [] };
+  };
+  const snapshot = await createLoader(run)(NOW);
+  assert.equal(snapshot.needsYou.length, 50);
+  assert.equal(snapshot.errors.length, 1);
+  assert.match(snapshot.errors[0], /^orca bot: Scheduler: .*50 ページを超えた/);
 });

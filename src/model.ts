@@ -74,8 +74,8 @@ export interface RawWorker {
 /**
  * dispatch を担当するエージェントを探す。coordinator や別の worker と同じ worktree に
  * 居ることがあるので、assigneePaneKey で見分ける（タブを移すと paneKey の後ろが変わるため、
- * 含まれるセッション ID でも照合する）。手掛かりが無いときは、その worktree に
- * parentPaneKey を持つエージェントが 1 人だけなら、それを担当とみなす。決められなければ出さない。
+ * 含まれるセッション ID でも照合する）。assigneePaneKey が無い dispatch は推測で結ばず、出さない
+ * （ペインが閉じて worktree に残った別の worker に、誤って結ばないため）。
  */
 function assigneeOf(
   w: RawWorker,
@@ -85,15 +85,11 @@ function assigneeOf(
   const agents = (wt?.agents ?? []).filter((a) => sessionKey(a.orcaSessionId));
   if (!wt || !agents.length) return null;
   const key = w.assigneePaneKey;
-  if (key) {
-    const agent =
-      agents.find((a) => a.paneKey === key) ??
-      agents.find((a) => key.includes(sessionKey(a.orcaSessionId)));
-    return agent ? { wt, agent } : null;
-  }
-  const children = agents.filter((a) => a.parentPaneKey);
-  if (children.length === 1) return { wt, agent: children[0] };
-  return agents.length === 1 ? { wt, agent: agents[0] } : null;
+  if (!key) return null;
+  const agent =
+    agents.find((a) => a.paneKey === key) ??
+    agents.find((a) => key.includes(sessionKey(a.orcaSessionId)));
+  return agent ? { wt, agent } : null;
 }
 
 /** `orca worktree ps --json` の worktrees[].agents[]。 */

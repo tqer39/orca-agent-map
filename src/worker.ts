@@ -81,14 +81,30 @@ const BOTS_TTL_MS = 15_000;
 /** ページを辿りすぎないための上限（100 件 × 50 ページ）。 */
 const MAX_ITEM_PAGES = 50;
 
-/** 1 つのボットの Needs you の Item を、nextCursor を辿って全ページ読む。 */
+export interface ItemsResult {
+  items: RawItem[];
+  /** 全ページを読めなかったとき、その理由。パネルに出す。 */
+  incomplete?: string;
+}
+
+/**
+ * 1 つのボットの Needs you の Item を、nextCursor を辿って全ページ読む。上限に達しても
+ * 続きがある、または一度見たカーソルがまた返ってきたときは、読めた分に「未取得あり」を添える。
+ */
 export async function needsYouItems(
   run: RunCli,
   bot: string,
-): Promise<RawItem[]> {
+): Promise<ItemsResult> {
   const items: RawItem[] = [];
+  const seen = new Set<string>();
   let cursor: string | undefined;
-  for (let page = 0; page < MAX_ITEM_PAGES; page++) {
+  for (let page = 0; ; page++) {
+    if (page === MAX_ITEM_PAGES) {
+      return {
+        items,
+        incomplete: `${bot}: Needs you の Item が ${MAX_ITEM_PAGES} ページを超えたので、続きを読んでいません`,
+      };
+    }
     const args = [
       "bot",
       "item",
@@ -105,16 +121,26 @@ export async function needsYouItems(
     for (const item of list<Omit<RawItem, "bot">>(out, "items"))
       items.push({ ...item, bot });
     const next = (out as { nextCursor?: unknown } | null)?.nextCursor;
-    if (typeof next !== "string" || !next || next === cursor) break;
+    if (typeof next !== "string" || !next) return { items };
+    if (cursor) seen.add(cursor);
+    if (next === cursor || seen.has(next)) {
+      return {
+        items,
+        incomplete: `${bot}: Needs you の Item のページが繰り返されたので、読むのを止めました`,
+      };
+    }
     cursor = next;
   }
-  return items;
 }
 
+/** 終わった worker のうち、担当を引いておく新しいものの数（worker-list は新しい順）。 */
+const RECENT_FINISHED_WORKERS = 20;
+
 /**
- * worker-list を読み、走っている worker に担当エージェントの paneKey を足す。
+ * worker-list を読み、worker に担当エージェントの paneKey を足す。
  * worker-list には dispatch とエージェントを結ぶ情報が無いので worker-show で引く。
- * dispatch の担当は変わらないので、引けた値は dispatch ごとに覚えておく。
+ * 引くのは走っている worker と、終わった worker のうち新しい RECENT_FINISHED_WORKERS 件。
+ * dispatch の担当は変わらないので、引けた値は dispatch ごとに覚え、終わった後も使う。
  */
 export function workersReader(
   run: RunCli,
@@ -125,9 +151,17 @@ export function workersReader(
       await run(["orchestration", "worker-list"]),
       "workers",
     );
+    // いまの一覧に無い dispatch は覚えておかない。
+    const listed = new Set(workers.map((w) => w.dispatchId));
+    for (const id of paneOf.keys()) if (!listed.has(id)) paneOf.delete(id);
     await Promise.all(
       workers
-        .filter((w) => w.outcome === "in_progress" || w.liveness === "live")
+        .filter(
+          (w, i) =>
+            w.outcome === "in_progress" ||
+            w.liveness === "live" ||
+            i < RECENT_FINISHED_WORKERS,
+        )
         .map(async (w) => {
           if (!paneOf.has(w.dispatchId)) {
             try {
@@ -141,13 +175,15 @@ export function workersReader(
               const key = out?.dispatch?.assigneePaneKey;
               paneOf.set(w.dispatchId, typeof key === "string" ? key : null);
             } catch {
-              // 引けなければ今回は手掛かり無しで描き、次の更新で引き直す。
-              return;
+              // 引けなければ今回はその worker を出さず、次の更新で引き直す。
             }
           }
-          w.assigneePaneKey = paneOf.get(w.dispatchId);
         }),
     );
+    for (const w of workers) {
+      const key = paneOf.get(w.dispatchId);
+      if (key) w.assigneePaneKey = key;
+    }
     return { workers };
   };
 }
@@ -155,6 +191,8 @@ export function workersReader(
 interface BotsAndItems {
   bots: string[];
   items: RawItem[];
+  /** 全ページを読めなかったボットの理由。 */
+  incomplete: string[];
 }
 
 /**
@@ -171,7 +209,11 @@ export function botsReader(
       .map((b) => b.name)
       .filter((name): name is string => Boolean(name));
     const lists = await Promise.all(bots.map((bot) => needsYouItems(run, bot)));
-    return { bots, items: lists.flat() };
+    return {
+      bots,
+      items: lists.flatMap((l) => l.items),
+      incomplete: lists.flatMap((l) => (l.incomplete ? [l.incomplete] : [])),
+    };
   };
   return (now) => {
     if (!cached || now - cached.at >= BOTS_TTL_MS)
@@ -211,8 +253,11 @@ export function createLoader(run: RunCli): (now: number) => Promise<Snapshot> {
         errors.push(`${label}: ${(r.reason as Error).message}`);
         return;
       }
-      if (key === "bots") Object.assign(last, r.value as BotsAndItems);
-      else last[key] = list(r.value, key) as never;
+      if (key === "bots") {
+        const { bots, items, incomplete } = r.value as BotsAndItems;
+        Object.assign(last, { bots, items });
+        for (const reason of incomplete) errors.push(`${label}: ${reason}`);
+      } else last[key] = list(r.value, key) as never;
     });
     const raw: RawSources = {
       messages: last.messages ?? [],
