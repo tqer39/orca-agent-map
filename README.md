@@ -56,15 +56,17 @@ handoff / question / escalation は、次のどれかが来るまで IN FLIGHT �
 
 Orca の plugin API には orchestration の inbox や worker 一覧を読むメソッドが無いため、プラグインの worker が `orca` CLI を呼んで JSON を読む。パネルが見えている間だけ、設定の間隔（既定 5 秒）で読み直す。
 
-| 表示                                                  | コマンド                                                    | 使う項目                                                                                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`        | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                        |
-| 走っている worker                                     | `orca orchestration worker-list --json`                     | `workspace` / `outcome` / `taskId`                                                                                                               |
-| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                   | `worktreeId` / `bot` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle` |
-| ボットのノード                                        | `orca bot list --json`                                      | `name`                                                                                                                                           |
-| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --json` | `title` / `question.text` / `updatedAt`                                                                                                          |
+| 表示                                                  | コマンド                                                                                         | 使う項目                                                                                                                                         |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`                                             | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                        |
+| 走っている worker                                     | `orca orchestration worker-list --json`                                                          | `workspace` / `outcome` / `liveness` / `taskId`                                                                                                  |
+| worker の担当エージェント                             | `orca orchestration worker-show --dispatch <id> --full --json`                                   | `dispatch.assigneePaneKey`                                                                                                                       |
+| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                                                        | `worktreeId` / `bot` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle` |
+| ボットのノード                                        | `orca bot list --json`                                                                           | `name`                                                                                                                                           |
+| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `nextCursor`                                                                                           |
 
 - inbox のセッション ID は `worktree ps` の `orcaSessionId` と突き合わせて名前にする。ボットの worktree のセッション（チャット）は、ボットごとに 1 つのノードにまとめる。
+- worker の担当エージェントは、`worker-show` の `assigneePaneKey`（含まれるセッション ID）で `ps` のエージェントと突き合わせる。coordinator や別の worker と同じ worktree に居ても取り違えない。dispatch の担当は変わらないので、引けた値は dispatch ごとに覚える。担当を決められない worker は出さない。
 - worker の依頼元は、worker のエージェントの `parentPaneKey` が指すペインのエージェント。
 - `ps` に居ない送り手は、`payload.botRequest.from` にボット名があればそれを、無ければセッション ID の先頭 6 文字を出す。
 - ボットの一覧と Item はボットの数だけ CLI を呼ぶので、15 秒のあいだ使い回す。
