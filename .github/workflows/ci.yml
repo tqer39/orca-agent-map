@@ -20,12 +20,10 @@ jobs:
         with:
           version: 2026.10.24
       - run: mise run bootstrap
-      - run: mise run lint
-      - run: mise run format:check
-      - run: mise run test
-      - run: mise run build
+      # check は lock の版の CLI で dev-standards check を行い、lint・format:check・test・build も実行する。
+      - run: mise run check
   # main の ruleset は `workflow-result` を必須チェックにしている（terraform-github の標準保護）。
-  # dev-standards が生成するジョブ名は `standards-check` なので、ここで集約する。
+  # dev-standards が生成するジョブ名は `standards-check` なので、同じ検査をここで集約する。
   workflow-result:
     needs: [verify]
     if: ${{ always() }}
