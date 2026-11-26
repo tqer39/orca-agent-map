@@ -63,6 +63,37 @@ export interface RawWorker {
   taskId?: string;
   workspace?: string;
   outcome?: string;
+  liveness?: string;
+  /**
+   * `orca orchestration worker-show --dispatch <id> --full --json` の dispatch.assigneePaneKey。
+   * worker-list には dispatch とエージェントを結ぶ情報が無いので、worker が足す。
+   */
+  assigneePaneKey?: string | null;
+}
+
+/**
+ * dispatch を担当するエージェントを探す。coordinator や別の worker と同じ worktree に
+ * 居ることがあるので、assigneePaneKey で見分ける（タブを移すと paneKey の後ろが変わるため、
+ * 含まれるセッション ID でも照合する）。手掛かりが無いときは、その worktree に
+ * parentPaneKey を持つエージェントが 1 人だけなら、それを担当とみなす。決められなければ出さない。
+ */
+function assigneeOf(
+  w: RawWorker,
+  worktrees: RawWorktree[],
+): { wt: RawWorktree; agent: RawAgent } | null {
+  const wt = worktrees.find((t) => t.worktreeId === w.workspace);
+  const agents = (wt?.agents ?? []).filter((a) => sessionKey(a.orcaSessionId));
+  if (!wt || !agents.length) return null;
+  const key = w.assigneePaneKey;
+  if (key) {
+    const agent =
+      agents.find((a) => a.paneKey === key) ??
+      agents.find((a) => key.includes(sessionKey(a.orcaSessionId)));
+    return agent ? { wt, agent } : null;
+  }
+  const children = agents.filter((a) => a.parentPaneKey);
+  if (children.length === 1) return { wt, agent: children[0] };
+  return agents.length === 1 ? { wt, agent: agents[0] } : null;
 }
 
 /** `orca worktree ps --json` の worktrees[].agents[]。 */
@@ -220,8 +251,12 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
   /** セッション ID → ノード ID。ボットのセッション（チャット）は 1 つのボットのノードにまとめる。 */
   const nodeOfSession = new Map<string, string>();
   const sessionByPane = new Map<string, string>();
-  const workerWorktrees = new Set(
-    raw.workers.map((w) => w.workspace).filter(Boolean),
+  const assignees = raw.workers.map((w) => ({
+    w,
+    found: assigneeOf(w, raw.worktrees),
+  }));
+  const workerSessions = new Set(
+    assignees.map((a) => sessionKey(a.found?.agent.orcaSessionId)),
   );
   const needs: Need[] = [];
   const nodeOf = (session: string) => nodeOfSession.get(session) ?? session;
@@ -242,7 +277,8 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
       const session = sessionKey(agent.orcaSessionId);
       if (!session) continue;
       // worker の worktree にも依頼元のボット名が付くが、worker は自分のノードとして描く。
-      const isWorker = workerWorktrees.has(wt.worktreeId);
+      // 同じ worktree の coordinator は worker 扱いしない。
+      const isWorker = workerSessions.has(session);
       const bot = isWorker ? null : wt.bot;
       const id = bot ? botNode(bot) : session;
       nodeOfSession.set(session, id);
@@ -347,24 +383,22 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
   // worker は走っている間と、終わってから WORKER_LINGER_MS の間だけ出す。
   // 送り元は ps の parentPaneKey が指す coordinator。
   const workerFlows: Flow[] = [];
-  for (const w of raw.workers) {
-    const wt = raw.worktrees.find((t) => t.worktreeId === w.workspace);
-    const agent = wt?.agents?.find((a) => sessionKey(a.orcaSessionId));
-    const to = sessionKey(agent?.orcaSessionId);
-    if (!to) continue;
+  for (const { w, found } of assignees) {
+    if (!found) continue;
+    const { wt, agent } = found;
+    const to = sessionKey(agent.orcaSessionId);
     const live = w.outcome === "in_progress";
-    if (!live && now - (agent?.stateStartedAt ?? 0) > WORKER_LINGER_MS)
-      continue;
+    if (!live && now - (agent.stateStartedAt ?? 0) > WORKER_LINGER_MS) continue;
     const from =
-      (agent?.parentPaneKey && sessionByPane.get(agent.parentPaneKey)) ||
+      (agent.parentPaneKey && sessionByPane.get(agent.parentPaneKey)) ||
       "coordinator";
     workerFlows.push({
       id: w.dispatchId,
       from,
       to,
       type: "worker",
-      subject: agent?.taskTitle || w.taskId || "",
-      at: wt?.createdAt ?? agent?.stateStartedAt ?? now,
+      subject: agent.taskTitle || w.taskId || "",
+      at: wt.createdAt ?? agent.stateStartedAt ?? now,
       live,
     });
   }

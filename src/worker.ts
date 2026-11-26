@@ -8,6 +8,7 @@ import {
   buildSnapshot,
   type RawItem,
   type RawSources,
+  type RawWorker,
   type Snapshot,
 } from "./model";
 import "./protocol";
@@ -77,6 +78,80 @@ function list<T>(value: unknown, key: string): T[] {
 
 const BOTS_TTL_MS = 15_000;
 
+/** ページを辿りすぎないための上限（100 件 × 50 ページ）。 */
+const MAX_ITEM_PAGES = 50;
+
+/** 1 つのボットの Needs you の Item を、nextCursor を辿って全ページ読む。 */
+export async function needsYouItems(
+  run: RunCli,
+  bot: string,
+): Promise<RawItem[]> {
+  const items: RawItem[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_ITEM_PAGES; page++) {
+    const args = [
+      "bot",
+      "item",
+      "list",
+      "--bot",
+      bot,
+      "--status",
+      "needs-you",
+      "--limit",
+      "100",
+    ];
+    if (cursor) args.push("--cursor", cursor);
+    const out = await run(args);
+    for (const item of list<Omit<RawItem, "bot">>(out, "items"))
+      items.push({ ...item, bot });
+    const next = (out as { nextCursor?: unknown } | null)?.nextCursor;
+    if (typeof next !== "string" || !next || next === cursor) break;
+    cursor = next;
+  }
+  return items;
+}
+
+/**
+ * worker-list を読み、走っている worker に担当エージェントの paneKey を足す。
+ * worker-list には dispatch とエージェントを結ぶ情報が無いので worker-show で引く。
+ * dispatch の担当は変わらないので、引けた値は dispatch ごとに覚えておく。
+ */
+export function workersReader(
+  run: RunCli,
+): () => Promise<{ workers: RawWorker[] }> {
+  const paneOf = new Map<string, string | null>();
+  return async () => {
+    const workers = list<RawWorker>(
+      await run(["orchestration", "worker-list"]),
+      "workers",
+    );
+    await Promise.all(
+      workers
+        .filter((w) => w.outcome === "in_progress" || w.liveness === "live")
+        .map(async (w) => {
+          if (!paneOf.has(w.dispatchId)) {
+            try {
+              const out = (await run([
+                "orchestration",
+                "worker-show",
+                "--dispatch",
+                w.dispatchId,
+                "--full",
+              ])) as { dispatch?: { assigneePaneKey?: unknown } } | null;
+              const key = out?.dispatch?.assigneePaneKey;
+              paneOf.set(w.dispatchId, typeof key === "string" ? key : null);
+            } catch {
+              // 引けなければ今回は手掛かり無しで描き、次の更新で引き直す。
+              return;
+            }
+          }
+          w.assigneePaneKey = paneOf.get(w.dispatchId);
+        }),
+    );
+    return { workers };
+  };
+}
+
 interface BotsAndItems {
   bots: string[];
   items: RawItem[];
@@ -95,23 +170,7 @@ export function botsReader(
     const bots = listed
       .map((b) => b.name)
       .filter((name): name is string => Boolean(name));
-    const lists = await Promise.all(
-      bots.map(async (bot) => {
-        const out = await run([
-          "bot",
-          "item",
-          "list",
-          "--bot",
-          bot,
-          "--status",
-          "needs-you",
-        ]);
-        return list<Omit<RawItem, "bot">>(out, "items").map((item) => ({
-          ...item,
-          bot,
-        }));
-      }),
-    );
+    const lists = await Promise.all(bots.map((bot) => needsYouItems(run, bot)));
     return { bots, items: lists.flat() };
   };
   return (now) => {
@@ -129,6 +188,7 @@ type Source = "messages" | "workers" | "worktrees" | "bots";
  */
 export function createLoader(run: RunCli): (now: number) => Promise<Snapshot> {
   const readBots = botsReader(run);
+  const readWorkers = workersReader(run);
   const last: Partial<RawSources> = {};
   const sources: [Source, string, () => Promise<unknown>][] = [
     [
@@ -136,11 +196,7 @@ export function createLoader(run: RunCli): (now: number) => Promise<Snapshot> {
       "orca orchestration inbox",
       () => run(["orchestration", "inbox", "--full", "--limit", "100"]),
     ],
-    [
-      "workers",
-      "orca orchestration worker-list",
-      () => run(["orchestration", "worker-list"]),
-    ],
+    ["workers", "orca orchestration worker-list", readWorkers],
     ["worktrees", "orca worktree ps", () => run(["worktree", "ps"])],
     ["bots", "orca bot", () => readBots(Date.now())],
   ];

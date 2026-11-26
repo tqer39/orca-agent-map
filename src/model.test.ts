@@ -227,3 +227,86 @@ test("別の依頼に結び付いた返事では、この依頼を閉じない",
   const s = buildSnapshot(raw, NOW);
   assert.ok(s.inFlight.some((f) => f.id === "msg_demo_02"));
 });
+
+/** coordinator と 2 人の worker が同じ worktree に居る（worker-start --worktree current）。 */
+function sharedWorktree(withPaneKeys: boolean) {
+  const sid = (n: number) => `00000000-0000-4000-9000-00000000000${n}`;
+  return buildSnapshot(
+    {
+      messages: [],
+      bots: [],
+      items: [],
+      worktrees: [
+        {
+          worktreeId: "repo::shared",
+          displayName: "shared",
+          agents: [
+            {
+              orcaSessionId: sid(1),
+              paneKey: "pane-c",
+              displayName: "coordinator",
+              state: "working",
+            },
+            {
+              orcaSessionId: sid(2),
+              paneKey: "pane-a",
+              parentPaneKey: "pane-c",
+              displayName: "worker-a",
+              state: "working",
+              taskTitle: "A をやる",
+            },
+            {
+              orcaSessionId: sid(3),
+              paneKey: "pane-b",
+              parentPaneKey: "pane-c",
+              displayName: "worker-b",
+              state: "blocked",
+              taskTitle: "B をやる",
+            },
+          ],
+        },
+      ],
+      workers: [
+        {
+          dispatchId: "ctx_a",
+          workspace: "repo::shared",
+          outcome: "in_progress",
+          assigneePaneKey: withPaneKeys ? "pane-a" : undefined,
+        },
+        // タブを移して paneKey の後ろが変わっても、含まれるセッション ID で見分ける。
+        {
+          dispatchId: "ctx_b",
+          workspace: "repo::shared",
+          outcome: "in_progress",
+          assigneePaneKey: withPaneKeys ? `x-${sid(3)}:moved` : undefined,
+        },
+      ],
+    },
+    NOW,
+  );
+}
+
+test("同じ worktree の worker は assigneePaneKey でそれぞれの担当エージェントに結ぶ", () => {
+  const s = sharedWorktree(true);
+  const label = (id: string) => s.nodes.find((n) => n.id === id)?.label;
+  assert.deepEqual(
+    s.inFlight.map((f) => [f.id, label(f.from), label(f.to), f.subject]).sort(),
+    [
+      ["ctx_a", "coordinator", "worker-a", "A をやる"],
+      ["ctx_b", "coordinator", "worker-b", "B をやる"],
+    ],
+  );
+  assert.deepEqual(s.nodes.map((n) => [n.label, n.kind]).sort(), [
+    ["coordinator", "agent"],
+    ["worker-a", "worker"],
+    ["worker-b", "worker"],
+  ]);
+});
+
+test("担当を決められない worker は、先頭のエージェントに結ばずに出さない", () => {
+  const s = sharedWorktree(false);
+  assert.deepEqual(s.inFlight, []);
+  assert.ok(
+    !s.nodes.some((n) => n.label === "coordinator" && n.kind === "worker"),
+  );
+});

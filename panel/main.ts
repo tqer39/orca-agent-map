@@ -1,5 +1,6 @@
 // パネルの DOM 側。worker に数秒おきにスナップショットを頼み、見えていない間は止める。
 import type { Snapshot } from "../src/protocol";
+import { createPoller } from "./poller";
 import { renderErrors, renderGraph, renderLists } from "./view";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -16,10 +17,6 @@ let snapshot: Snapshot | null = null;
 let lastOkAt: number | null = null;
 let masked = false;
 let refreshMs = 5000;
-let timer: ReturnType<typeof setTimeout> | undefined;
-/** 要求は 1 つずつ送る。古い応答で新しい表示を上書きせず、更新のループも 1 本に保つ。 */
-let running = false;
-let again = false;
 
 function render(): void {
   maskEl.setAttribute("aria-pressed", String(masked));
@@ -38,14 +35,7 @@ function render(): void {
   errorsEl.innerHTML = renderErrors(snapshot.errors, lastOkAt, Date.now());
 }
 
-async function refresh(): Promise<void> {
-  if (running) {
-    again = true;
-    return;
-  }
-  clearTimeout(timer);
-  if (document.hidden) return;
-  running = true;
+async function load(): Promise<void> {
   try {
     snapshot = await orca.plugin.request("map.snapshot");
     if (!snapshot.errors.length) lastOkAt = snapshot.at;
@@ -59,17 +49,16 @@ async function refresh(): Promise<void> {
         '<p class="empty">Orca の情報を読めませんでした。次の更新で読み直します。</p>';
       errorsEl.innerHTML = renderErrors(errors, null, Date.now());
     }
-  } finally {
-    running = false;
   }
   render();
-  if (again) {
-    again = false;
-    void refresh();
-    return;
-  }
-  timer = setTimeout(refresh, refreshMs);
 }
+
+// 要求は 1 つずつ送り、古い応答で新しい表示を上書きしない。
+const refresh = createPoller({
+  tick: load,
+  hidden: () => document.hidden,
+  intervalMs: () => refreshMs,
+});
 
 async function loadSettings(): Promise<void> {
   const settings = await orca.settings.get();
