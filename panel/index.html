@@ -205,14 +205,14 @@
         padding: 5px 0;
         border-top: 1px solid var(--orca-border);
       }
-      .row.openable {
+      .row > .open {
         cursor: pointer;
         border-radius: 4px;
       }
-      .row.openable:hover {
+      .row > .open:hover {
         background: color-mix(in srgb, var(--orca-foreground) 6%, transparent);
       }
-      .row.openable:focus-visible {
+      .row > .open:focus-visible {
         outline: 2px solid var(--orca-ring);
         outline-offset: -2px;
       }
@@ -220,6 +220,60 @@
         color: var(--orca-muted-foreground);
         font-size: 10px;
         white-space: nowrap;
+      }
+      .tickets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 3px;
+      }
+      .tickets .ticket {
+        font: inherit;
+        font-size: 10px;
+        line-height: 1.4;
+        padding: 0 6px;
+        border-radius: 4px;
+        border: 1px solid var(--orca-border);
+        background: transparent;
+        color: var(--orca-muted-foreground);
+        white-space: nowrap;
+      }
+      /* 押せるバッジ（URL がある）だけ、リンクの見た目にする。 */
+      .tickets button.ticket {
+        color: var(--orca-foreground);
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .tickets button.ticket:hover {
+        background: var(--orca-accent);
+        color: var(--orca-accent-foreground);
+      }
+      .tickets button.ticket:focus-visible {
+        outline: 2px solid var(--orca-ring);
+        outline-offset: 1px;
+      }
+      svg.graph .ticket rect {
+        fill: var(--orca-background);
+        stroke: var(--orca-border);
+      }
+      svg.graph .ticket text {
+        fill: var(--orca-muted-foreground);
+        font-size: 9px;
+      }
+      svg.graph .ticket[data-ticket-url] {
+        cursor: pointer;
+        outline: none;
+      }
+      svg.graph .ticket[data-ticket-url] text {
+        fill: var(--orca-card-foreground);
+        text-decoration: underline;
+      }
+      svg.graph .ticket[data-ticket-url]:hover rect {
+        fill: var(--orca-accent);
+      }
+      svg.graph .ticket[data-ticket-url]:focus-visible rect {
+        stroke: var(--orca-ring);
+        stroke-width: 2;
       }
       .row.live .route::before {
         content: '';
@@ -320,7 +374,7 @@
       <span id="demo" class="pill" hidden>demo</span>
       <span id="needs" class="pill" hidden></span>
       <span id="live" class="pill">0 live</span>
-      <button id="mask" type="button" aria-pressed="false" title="件名を伏せる">Masked</button>
+      <button id="mask" type="button" aria-pressed="false" title="件名とチケット番号を伏せる">Masked</button>
     </header>
     <div id="graph"><p class="empty">読み込み中…</p></div>
     <div id="errors"></div>

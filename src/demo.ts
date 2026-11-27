@@ -105,6 +105,16 @@ export function demoSources(now: number): RawSources {
       {
         worktreeId: "repo::planner",
         displayName: "Planner",
+        linkedItems: [
+          {
+            provider: "linear",
+            type: "issue",
+            number: 123,
+            identifier: "ABC-123",
+            title: "ログイン画面の改修",
+            url: "https://linear.example.com/demo/issue/ABC-123",
+          },
+        ],
         agents: [
           { orcaSessionId: ids.planner, paneKey: "pane-2", state: "working" },
         ],
@@ -126,6 +136,27 @@ export function demoSources(now: number): RawSources {
       {
         worktreeId: "repo::demo-a",
         displayName: "builder-a",
+        // 同じ PR が linkedItems と linkedPR の両方にあっても、バッジは 1 つにまとめる。
+        linkedItems: [
+          {
+            provider: "jira",
+            type: "issue",
+            number: 124,
+            identifier: "ABC-124",
+            url: "https://jira.example.com/browse/ABC-124",
+          },
+          {
+            provider: "github",
+            type: "pr",
+            number: 12,
+            url: "https://github.example.com/demo/app/pull/12",
+          },
+        ],
+        linkedPR: {
+          number: 12,
+          title: "ログイン画面のフォーム",
+          url: "https://github.example.com/demo/app/pull/12",
+        },
         createdAt: now - 6 * min,
         agents: [
           {
@@ -187,6 +218,14 @@ export function demoSources(now: number): RawSources {
         status: "needs_you",
         question: { text: "来週の定例は火曜と木曜のどちらにしますか？" },
         updatedAt: now - 3 * min,
+        links: [
+          {
+            pr: {
+              number: 7,
+              url: "https://github.example.com/demo/calendar/pull/7",
+            },
+          },
+        ],
       },
       {
         bot: "Scheduler",
