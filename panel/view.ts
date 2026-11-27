@@ -1,5 +1,12 @@
 // スナップショットを HTML 文字列にする純粋関数。DOM に触らないので Node でテストできる。
-import type { Flow, MapNode, Need, NeedReason, Snapshot } from "../src/model";
+import type {
+  Flow,
+  MapNode,
+  Need,
+  NeedReason,
+  NeedTarget,
+  Snapshot,
+} from "../src/model";
 import { escapeHtml } from "./html";
 import { BADGE_H, renderNodeTickets, renderTickets } from "./tickets";
 
@@ -160,6 +167,55 @@ function ports(edges: Edge[], placed: Map<string, Placed>) {
   };
 }
 
+/** 押したときにすること。Orca で開く先があればそこを、無ければリンクをブラウザで開く。 */
+export type GoAction =
+  | { kind: "orca"; target: NeedTarget }
+  | { kind: "external"; url: string };
+
+/**
+ * 実際に開けるものだけを返す（null なら押せる見た目にしない）。デモのデータは Orca に無い
+ * ワークスペースを指すので開かない。external は、パネルが URL を開けるか（orca.shell がある）。
+ */
+export function goOf(
+  snapshot: Snapshot,
+  target: NeedTarget | undefined,
+  url: string | undefined,
+  external: boolean,
+): GoAction | null {
+  if (snapshot.demo) return null;
+  if (target) return { kind: "orca", target };
+  if (url && external) return { kind: "external", url };
+  return null;
+}
+
+/** 行やノードの data-go の値から、押したときにすることを引く。`need:<id>` か `node:<id>`。 */
+export function actionFor(
+  snapshot: Snapshot,
+  key: string,
+  external: boolean,
+): GoAction | null {
+  if (key.startsWith("need:")) {
+    const need = snapshot.needsYou.find((n) => n.id === key.slice(5));
+    return need ? goOf(snapshot, need.target, need.url, external) : null;
+  }
+  if (key.startsWith("node:"))
+    return goOf(snapshot, snapshot.targets[key.slice(5)], undefined, external);
+  return null;
+}
+
+/**
+ * 一覧の行の、開く部分の開きタグ。行（li）は操作できる要素にせず、開く部分とチケットのバッジを
+ * 兄弟として並べる（role="button" の中に別のボタンを入れない）。開けない行は飾りの無い div。
+ */
+function openPart(go: GoAction | null, key: string, title: string): string {
+  return go ? `<div class="open"${goAttrs(key, title, "title")}>` : "<div>";
+}
+
+/** 押せる行やノードの属性。Tab で選べ、Enter / Space で押せる（main.ts が扱う）。 */
+function goAttrs(key: string, label: string, attr: "title" | "aria-label") {
+  return ` data-go="${escapeHtml(key)}" role="button" tabindex="0" ${attr}="${escapeHtml(label)}"`;
+}
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
@@ -198,8 +254,12 @@ export function renderGraph(
       const state = p.node.needsYou
         ? `${p.node.state}, needs you`
         : p.node.state;
+      const key = `node:${p.node.id}`;
+      const go = actionFor(snapshot, key, false)
+        ? goAttrs(key, `${p.node.label} (${state}): Orca で開く`, "aria-label")
+        : "";
       return (
-        `<g class="node ${p.node.kind}${p.node.needsYou ? " needs" : ""}" transform="translate(${p.x},${p.y})">` +
+        `<g class="node ${p.node.kind}${p.node.needsYou ? " needs" : ""}"${go} transform="translate(${p.x},${p.y})">` +
         `<title>${escapeHtml(p.node.label)} (${state})</title>` +
         `<rect width="${nodeW}" height="${NODE_H}" rx="6"/>` +
         mark +
@@ -238,13 +298,17 @@ export function renderRow(
   masked: boolean,
 ): string {
   const subject = masked ? "••••••" : escapeHtml(f.subject || "（件名なし）");
+  const to = labelOf(snapshot, f.to);
+  // 依頼や報告が届いた先（受け手）を開く。
+  const key = `node:${f.to}`;
+  const go = actionFor(snapshot, key, false);
   return (
-    `<li class="row${f.live ? " live" : ""}">` +
+    `<li class="row${f.live ? " live" : ""}">${openPart(go, key, `${to} を Orca で開く`)}` +
     `<div class="route"><span class="who">${escapeHtml(labelOf(snapshot, f.from))}</span>` +
-    `<span class="to">→</span><span class="who">${escapeHtml(labelOf(snapshot, f.to))}</span>` +
+    `<span class="to">→</span><span class="who">${escapeHtml(to)}</span>` +
     `<span class="kind ${kindClass(f.type)}">${escapeHtml(f.type)}</span>` +
     `<time>${relativeTime(f.at, snapshot.at)}</time></div>` +
-    `<div class="subject${masked ? " masked" : ""}">${subject}</div>` +
+    `<div class="subject${masked ? " masked" : ""}">${subject}</div></div>` +
     // 依頼や報告の受け手のチケット。
     renderTickets(snapshot.tickets[f.to], `flow:${f.id}`, {
       masked,
@@ -276,24 +340,22 @@ export const NEED_LABELS: Record<NeedReason, string> = {
 
 /** 開ける行の title。Item はボットのホームまでしか開けないことも伝える。 */
 export const NEED_OPEN_TITLE = "Orca で開く（Item はボットのホームを開く）";
+/** Orca で開く先が無く、Item のリンクをブラウザで開く行の title。 */
+export const NEED_LINK_TITLE = "Item のリンク（PR など）をブラウザで開く";
 
 export function renderNeed(
   snapshot: Snapshot,
   n: Need,
   masked: boolean,
+  external: boolean,
 ): string {
   const text = masked ? "••••••" : escapeHtml(n.text);
-  // デモのデータは Orca に無いワークスペースを指すので、開けるようにしない。
-  // 行（li）は操作できる要素にせず、開く部分とチケットのバッジを兄弟として並べる
-  // （role="button" の中に別のボタンを入れない）。
-  const open =
-    n.target && !snapshot.demo
-      ? `<div class="open" role="button" tabindex="0" title="${NEED_OPEN_TITLE}" data-need="${escapeHtml(n.id)}">`
-      : "<div>";
+  const go = goOf(snapshot, n.target, n.url, external);
+  const title = go?.kind === "orca" ? NEED_OPEN_TITLE : NEED_LINK_TITLE;
   const item =
     n.item !== undefined ? `<span class="item-no">#${n.item}</span>` : "";
   return (
-    `<li class="row needs">${open}` +
+    `<li class="row needs">${openPart(go, `need:${n.id}`, title)}` +
     `<div class="route"><span class="needs-icon" aria-hidden="true">!</span>` +
     `<span class="who">${escapeHtml(labelOf(snapshot, n.node))}</span>${item}` +
     `<span class="kind needs ${n.reason}">${NEED_LABELS[n.reason]}</span>` +
@@ -304,11 +366,16 @@ export function renderNeed(
   );
 }
 
-export function renderLists(snapshot: Snapshot, masked: boolean): string {
+/** external は、パネルが URL をブラウザで開けるか（orca.shell がある）。 */
+export function renderLists(
+  snapshot: Snapshot,
+  masked: boolean,
+  external: boolean,
+): string {
   const rows = (flows: Flow[]) =>
     flows.map((f) => renderRow(snapshot, f, masked)).join("");
   const needs = snapshot.needsYou
-    .map((n) => renderNeed(snapshot, n, masked))
+    .map((n) => renderNeed(snapshot, n, masked, external))
     .join("");
   return (
     section(

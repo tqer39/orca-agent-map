@@ -1,8 +1,10 @@
 // パネルの DOM 側。worker に数秒おきにスナップショットを頼み、見えていない間は止める。
 import type { Snapshot } from "../src/protocol";
+import { keepFocus } from "./focus";
+import { errorText, goer } from "./go";
 import { createPoller } from "./poller";
 import { ticketHandler } from "./tickets";
-import { renderErrors, renderGraph, renderLists } from "./view";
+import { actionFor, renderErrors, renderGraph, renderLists } from "./view";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const graphEl = $("graph");
@@ -18,13 +20,9 @@ let snapshot: Snapshot | null = null;
 let lastOkAt: number | null = null;
 let masked = false;
 let refreshMs = 5000;
-/** Need You の行を開けなかったときの理由。次に開けるまで表示する。 */
+/** 行やノードを開けなかったときの理由。次に開けるまで表示する。 */
 let openError: string | null = null;
-
-function errorText(error: unknown): string {
-  const e = error as { code?: string; message?: string };
-  return `${e.code ?? "error"}: ${e.message ?? ""}`;
-}
+const shell = orca.shell;
 
 function render(): void {
   maskEl.setAttribute("aria-pressed", String(masked));
@@ -38,16 +36,15 @@ function render(): void {
   demoEl.hidden = !snapshot.demo;
   // 描き直すとバッジも作り直されるので、キーボードで選んでいたバッジにフォーカスを戻す。
   const ticket = document.activeElement?.getAttribute("data-ticket");
-  graphEl.innerHTML = snapshot.nodes.length
-    ? renderGraph(snapshot, Math.max(240, graphEl.clientWidth), masked)
-    : '<p class="empty">ボットもやりとりもまだありません</p>';
-  // 描き直すと行が作り直されるので、キーボードで選んでいた行にフォーカスを戻す。
-  const focused = (document.activeElement as HTMLElement | null)?.dataset?.need;
-  listsEl.innerHTML = renderLists(snapshot, masked);
-  if (focused)
-    listsEl.querySelectorAll<HTMLElement>("[data-need]").forEach((row) => {
-      if (row.dataset.need === focused) row.focus();
-    });
+  const s = snapshot;
+  keepFocus(graphEl, document.activeElement as HTMLElement | null, () => {
+    graphEl.innerHTML = s.nodes.length
+      ? renderGraph(s, Math.max(240, graphEl.clientWidth), masked)
+      : '<p class="empty">ボットもやりとりもまだありません</p>';
+  });
+  keepFocus(listsEl, document.activeElement as HTMLElement | null, () => {
+    listsEl.innerHTML = renderLists(s, masked, Boolean(shell));
+  });
   if (ticket)
     document
       .querySelectorAll<HTMLElement | SVGElement>("[data-ticket]")
@@ -58,25 +55,7 @@ function render(): void {
   errorsEl.innerHTML = renderErrors(errors, lastOkAt, Date.now());
 }
 
-async function openNeed(id: string): Promise<void> {
-  const target = snapshot?.needsYou.find((n) => n.id === id)?.target;
-  if (!target) return;
-  try {
-    await orca.plugin.request("map.open", target);
-    openError = null;
-  } catch (error) {
-    openError = `Orca で開けませんでした（${errorText(error)}）`;
-  }
-  render();
-}
-
-function needOf(event: Event): string | undefined {
-  return (event.target as Element | null)?.closest<HTMLElement>("[data-need]")
-    ?.dataset.need;
-}
-
 // チケットのバッジ。行やノードを押す操作より先に受けるよう、capture で登録する。
-const shell = orca.shell;
 const onTicket = ticketHandler({
   openExternal: shell && ((url) => shell.openExternal(url)),
   report: (text) => {
@@ -87,17 +66,35 @@ const onTicket = ticketHandler({
 document.addEventListener("click", onTicket, true);
 document.addEventListener("keydown", onTicket, true);
 
-listsEl.addEventListener("click", (event) => {
-  const id = needOf(event);
-  if (id) void openNeed(id);
+const go = goer({
+  open: (target) => orca.plugin.request("map.open", target),
+  openExternal: shell && ((url) => shell.openExternal(url)),
+  // userActivation の無い環境では、開けるかどうかは shell に任せる。
+  active: () => globalThis.navigator?.userActivation?.isActive ?? true,
+  report: (error) => {
+    openError = error;
+    render();
+  },
 });
 
-listsEl.addEventListener("keydown", (event) => {
+/** 押された行やノードを開く。 */
+function goTo(event: Event): boolean {
+  const key = (event.target as Element | null)
+    ?.closest?.("[data-go]")
+    ?.getAttribute("data-go");
+  const action = key && snapshot && actionFor(snapshot, key, Boolean(shell));
+  if (action) void go(action);
+  return Boolean(action);
+}
+
+document.addEventListener("click", (event) => {
+  goTo(event);
+});
+
+// 行もノードも role="button" の要素なので、Enter / Space はここで扱う。
+document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
-  const id = needOf(event);
-  if (!id) return;
-  event.preventDefault();
-  void openNeed(id);
+  if (goTo(event)) event.preventDefault();
 });
 
 async function load(): Promise<void> {

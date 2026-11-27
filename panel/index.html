@@ -140,6 +140,19 @@
       .dot.blocked {
         fill: var(--c-blocked);
       }
+      /* 開けるノードだけ、押せる見た目にする。 */
+      .node[data-go] {
+        cursor: pointer;
+        outline: none;
+      }
+      .node[data-go]:hover rect {
+        fill: var(--orca-accent);
+      }
+      .node[data-go]:focus-visible rect {
+        stroke: var(--orca-ring);
+        stroke-width: 2;
+        animation: none;
+      }
       .edge {
         fill: none;
         stroke-width: 1.5;

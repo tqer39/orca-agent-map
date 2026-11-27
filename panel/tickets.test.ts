@@ -45,7 +45,7 @@ test("バッジの文字と URL はエスケープする", () => {
 test("Masked ならバッジも伏せ、押せなくする", () => {
   for (const html of [
     renderTickets(tickets, "need:x", { masked: true, demo: false }),
-    renderLists(snapshot, true),
+    renderLists(snapshot, true, true),
     renderGraph(snapshot, 320, true),
   ]) {
     assert.ok(html.includes("•••"));
@@ -56,13 +56,13 @@ test("Masked ならバッジも伏せ、押せなくする", () => {
 });
 
 test("デモ表示のバッジは押せない", () => {
-  const html = renderLists({ ...snapshot, demo: true }, false);
+  const html = renderLists({ ...snapshot, demo: true }, false, true);
   assert.ok(html.includes('<span class="ticket static">ABC-123</span>'));
   assert.ok(!html.includes("data-ticket-url"));
 });
 
 test("一覧: 依頼の行は受け手の、NEEDS YOU の行はその相手のチケットを出す", () => {
-  const html = renderLists(snapshot, false);
+  const html = renderLists(snapshot, false, true);
   // Planner 宛ての依頼の行と、builder-a（許可待ち）と Item の行。
   assert.ok(html.includes(`data-ticket="flow:msg_demo_01#${URL_1}"`));
   assert.ok(html.includes(">ABC-124</button>"));
