@@ -1,5 +1,14 @@
 // Orca の CLI が返す JSON を、パネルが描くスナップショットに変換する純粋関数。
 // worker から呼ばれ、テストではダミーデータで直接呼ぶ。
+import {
+  itemTickets,
+  type LinkedSlots,
+  type RawItemLink,
+  type Ticket,
+  worktreeTickets,
+} from "./tickets";
+
+export type { Ticket };
 
 export type AgentState = "working" | "blocked" | "waiting" | "done" | "unknown";
 export type NodeKind = "bot" | "agent" | "worker";
@@ -36,6 +45,8 @@ export interface Need {
   target?: NeedTarget;
   /** reason が item のときの Item 番号。開けるのはボットのホームまでなので、行に出して探せるようにする。 */
   item?: number;
+  /** 行に出すチケット。agent はその worktree の参照、Item は links にある PR。 */
+  tickets?: Ticket[];
 }
 
 export interface Flow {
@@ -55,6 +66,11 @@ export interface Snapshot {
   inFlight: Flow[];
   recent: Flow[];
   needsYou: Need[];
+  /**
+   * ノード ID ごとのチケット（無いノードは載せない）。エージェントと worker はその worktree の参照、
+   * ボットはホームの worktree の参照だけ（全セッション分をまとめると多くなりすぎるため）。
+   */
+  tickets: Record<string, Ticket[]>;
   errors: string[];
   demo: boolean;
 }
@@ -121,7 +137,7 @@ export interface RawAgent {
 }
 
 /** `orca worktree ps --json` の worktrees[]。 */
-export interface RawWorktree {
+export interface RawWorktree extends LinkedSlots {
   worktreeId?: string;
   bot?: string | null;
   displayName?: string | null;
@@ -141,6 +157,7 @@ export interface RawItem {
   status?: string;
   question?: { text?: string } | null;
   updatedAt?: number | string;
+  links?: RawItemLink[] | null;
 }
 
 export interface RawSources {
@@ -282,6 +299,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     assignees.map((a) => sessionKey(a.found?.agent.orcaSessionId)),
   );
   const needs: Need[] = [];
+  const tickets: Record<string, Ticket[]> = {};
   const nodeOf = (session: string) => nodeOfSession.get(session) ?? session;
 
   const addNode = (id: string, info: AgentInfo) => {
@@ -296,6 +314,9 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     addNode(botNode(name), { label: name, kind: "bot", state: "unknown" });
 
   for (const wt of raw.worktrees) {
+    const linked = worktreeTickets(wt);
+    if (linked.length && wt.bot && wt.botHome === true)
+      tickets[botNode(wt.bot)] = linked;
     for (const agent of wt.agents ?? []) {
       const session = sessionKey(agent.orcaSessionId);
       if (!session) continue;
@@ -305,6 +326,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
       const bot = isWorker ? null : wt.bot;
       const id = bot ? botNode(bot) : session;
       nodeOfSession.set(session, id);
+      if (linked.length && !bot) tickets[id] = linked;
       if (agent.paneKey) sessionByPane.set(agent.paneKey, session);
       addNode(id, {
         label:
@@ -324,6 +346,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
           node: id,
           ...need,
           ...(target ? { target } : {}),
+          ...(linked.length ? { tickets: linked } : {}),
         });
       }
     }
@@ -340,6 +363,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     const node = botNode(item.bot);
     addNode(node, { label: item.bot, kind: "bot", state: "unknown" });
     const home = homeOf.get(item.bot);
+    const prs = itemTickets(item.links);
     needs.push({
       id: `item:${item.bot}:${item.number ?? item.title}`,
       node,
@@ -349,6 +373,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
       at: itemTime(item.updatedAt),
       ...(home ? { target: { workspaceId: home } } : {}),
       ...(typeof item.number === "number" ? { item: item.number } : {}),
+      ...(prs.length ? { tickets: prs } : {}),
     });
   }
   needs.sort(
@@ -482,6 +507,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     inFlight,
     recent,
     needsYou: needs,
+    tickets,
     errors: [],
     demo: false,
   };

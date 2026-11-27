@@ -1,19 +1,13 @@
 // スナップショットを HTML 文字列にする純粋関数。DOM に触らないので Node でテストできる。
 import type { Flow, MapNode, Need, NeedReason, Snapshot } from "../src/model";
+import { escapeHtml } from "./html";
+import { BADGE_H, renderNodeTickets, renderTickets } from "./tickets";
+
+export { escapeHtml };
 
 const NODE_H = 26;
 const ROW_GAP = 10;
 const PAD = 8;
-
-export function escapeHtml(text: string): string {
-  return text.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ] as string,
-  );
-}
 
 /** 色分け用の種類。表示は Orca の種類名そのまま。 */
 export function kindClass(type: string): string {
@@ -42,8 +36,16 @@ interface Placed {
   side: "left" | "right";
 }
 
-/** 送るほうが多いノードを左、受けるほうが多いノードを右に並べる。 */
-export function layout(nodes: MapNode[], flows: Flow[], width: number) {
+/**
+ * 送るほうが多いノードを左、受けるほうが多いノードを右に並べる。
+ * `below` はノードの下に空ける高さ（チケットのバッジの段）。
+ */
+export function layout(
+  nodes: MapNode[],
+  flows: Flow[],
+  width: number,
+  below = 0,
+) {
   const out = new Map<string, number>();
   const inn = new Map<string, number>();
   for (const f of flows) {
@@ -59,16 +61,17 @@ export function layout(nodes: MapNode[], flows: Flow[], width: number) {
   for (const n of nodes)
     ((out.get(n.id) ?? 0) >= (inn.get(n.id) ?? 0) ? left : right).push(n);
   const rows = Math.max(left.length, right.length, 1);
+  const pitch = NODE_H + below + ROW_GAP;
   const placed = new Map<string, Placed>();
   // 短いほうの列は縦の中央に寄せ、線が扇形に広がるようにする。
   const put = (column: MapNode[], side: "left" | "right") => {
-    const top = PAD + ((rows - column.length) * (NODE_H + ROW_GAP)) / 2;
+    const top = PAD + ((rows - column.length) * pitch) / 2;
     column.forEach((node, i) => {
       placed.set(node.id, {
         node,
         side,
         x: side === "left" ? PAD : width - PAD - nodeW,
-        y: top + i * (NODE_H + ROW_GAP),
+        y: top + i * pitch,
       });
     });
   };
@@ -77,7 +80,7 @@ export function layout(nodes: MapNode[], flows: Flow[], width: number) {
   return {
     placed,
     nodeW,
-    height: 2 * PAD + rows * NODE_H + (rows - 1) * ROW_GAP,
+    height: 2 * PAD + rows * pitch - ROW_GAP,
   };
 }
 
@@ -161,9 +164,17 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-export function renderGraph(snapshot: Snapshot, width: number): string {
+export function renderGraph(
+  snapshot: Snapshot,
+  width: number,
+  masked = false,
+): string {
   const flows = [...snapshot.inFlight, ...snapshot.recent];
-  const { placed, nodeW, height } = layout(snapshot.nodes, flows, width);
+  // バッジのあるノードが 1 つでもあれば、全部の行にバッジの段を空ける。
+  const below = snapshot.nodes.some((n) => snapshot.tickets[n.id]?.length)
+    ? BADGE_H + 3
+    : 0;
+  const { placed, nodeW, height } = layout(snapshot.nodes, flows, width, below);
   const maxChars = Math.max(6, Math.floor((nodeW - 24) / 6.5));
   const all = edgesOf(flows).filter(
     (e) => placed.has(e.from) && placed.has(e.to),
@@ -193,7 +204,15 @@ export function renderGraph(snapshot: Snapshot, width: number): string {
         `<rect width="${nodeW}" height="${NODE_H}" rx="6"/>` +
         mark +
         `<text x="21" y="${cy + 4}">${escapeHtml(truncate(p.node.label, maxChars))}</text>` +
-        `</g>`
+        `</g>` +
+        renderNodeTickets(
+          snapshot.tickets[p.node.id],
+          `node:${p.node.id}`,
+          { masked, demo: snapshot.demo },
+          p.x,
+          p.y + NODE_H + 3,
+          nodeW,
+        )
       );
     })
     .join("");
@@ -203,7 +222,7 @@ export function renderGraph(snapshot: Snapshot, width: number): string {
         `<marker id="arrow-${k}" class="arrow ${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z"/></marker>`,
     )
     .join("");
-  return `<svg class="graph" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="依頼の相関図"><defs>${markers}</defs>${edges}${nodes}</svg>`;
+  return `<svg class="graph" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="group" aria-label="依頼の相関図"><defs>${markers}</defs>${edges}${nodes}</svg>`;
 }
 
 function labelOf(snapshot: Snapshot, id: string): string {
@@ -225,7 +244,13 @@ export function renderRow(
     `<span class="to">→</span><span class="who">${escapeHtml(labelOf(snapshot, f.to))}</span>` +
     `<span class="kind ${kindClass(f.type)}">${escapeHtml(f.type)}</span>` +
     `<time>${relativeTime(f.at, snapshot.at)}</time></div>` +
-    `<div class="subject${masked ? " masked" : ""}">${subject}</div></li>`
+    `<div class="subject${masked ? " masked" : ""}">${subject}</div>` +
+    // 依頼や報告の受け手のチケット。
+    renderTickets(snapshot.tickets[f.to], `flow:${f.id}`, {
+      masked,
+      demo: snapshot.demo,
+    }) +
+    `</li>`
   );
 }
 
@@ -271,7 +296,9 @@ export function renderNeed(
     `<span class="who">${escapeHtml(labelOf(snapshot, n.node))}</span>${item}` +
     `<span class="kind needs ${n.reason}">${NEED_LABELS[n.reason]}</span>` +
     `<time>${n.at ? relativeTime(n.at, snapshot.at) : ""}</time></div>` +
-    `<div class="subject${masked ? " masked" : ""}">${text}</div></li>`
+    `<div class="subject${masked ? " masked" : ""}">${text}</div>` +
+    renderTickets(n.tickets, `need:${n.id}`, { masked, demo: snapshot.demo }) +
+    `</li>`
   );
 }
 

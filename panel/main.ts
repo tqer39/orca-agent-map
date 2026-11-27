@@ -1,6 +1,7 @@
 // パネルの DOM 側。worker に数秒おきにスナップショットを頼み、見えていない間は止める。
 import type { Snapshot } from "../src/protocol";
 import { createPoller } from "./poller";
+import { ticketHandler } from "./tickets";
 import { renderErrors, renderGraph, renderLists } from "./view";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -35,8 +36,10 @@ function render(): void {
   needsEl.textContent = `! ${needs} needs you`;
   needsEl.hidden = needs === 0;
   demoEl.hidden = !snapshot.demo;
+  // 描き直すとバッジも作り直されるので、キーボードで選んでいたバッジにフォーカスを戻す。
+  const ticket = document.activeElement?.getAttribute("data-ticket");
   graphEl.innerHTML = snapshot.nodes.length
-    ? renderGraph(snapshot, Math.max(240, graphEl.clientWidth))
+    ? renderGraph(snapshot, Math.max(240, graphEl.clientWidth), masked)
     : '<p class="empty">ボットもやりとりもまだありません</p>';
   // 描き直すと行が作り直されるので、キーボードで選んでいた行にフォーカスを戻す。
   const focused = (document.activeElement as HTMLElement | null)?.dataset?.need;
@@ -45,6 +48,12 @@ function render(): void {
     listsEl.querySelectorAll<HTMLElement>("[data-need]").forEach((row) => {
       if (row.dataset.need === focused) row.focus();
     });
+  if (ticket)
+    document
+      .querySelectorAll<HTMLElement | SVGElement>("[data-ticket]")
+      .forEach((el) => {
+        if (el.getAttribute("data-ticket") === ticket) el.focus();
+      });
   const errors = openError ? [...snapshot.errors, openError] : snapshot.errors;
   errorsEl.innerHTML = renderErrors(errors, lastOkAt, Date.now());
 }
@@ -65,6 +74,18 @@ function needOf(event: Event): string | undefined {
   return (event.target as Element | null)?.closest<HTMLElement>("[data-need]")
     ?.dataset.need;
 }
+
+// チケットのバッジ。行やノードを押す操作より先に受けるよう、capture で登録する。
+const shell = orca.shell;
+const onTicket = ticketHandler({
+  openExternal: shell && ((url) => shell.openExternal(url)),
+  report: (text) => {
+    openError = text;
+    render();
+  },
+});
+document.addEventListener("click", onTicket, true);
+document.addEventListener("keydown", onTicket, true);
 
 listsEl.addEventListener("click", (event) => {
   const id = needOf(event);

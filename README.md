@@ -41,10 +41,16 @@ orca plugin open local.agent-map --panel agent-map
   - チャットのエージェント・worker: そのワークスペースを開く（`workspace.open`）。どのチャットのタブを出すかを選ぶ API は無いので、タブは Orca が前に出していたものになる。
   - ボットの Item: Item の画面を開く API は無いので、ボットのホーム（Home Chat のあるワークスペース）を開く。行に Item 番号（`#12`）を出すので、`orca bot item show` などで探せる。
   - 開けなかったときは「更新できませんでした」の欄に理由を出す。デモデータの行は開けない。
+- **チケットのバッジ**: ワークスペースに付けた参照（チケット・PR）と、そのブランチの PR を、ノードの下と一覧の各行に出す。表示名は Orca と同じで、Linear と Jira は `ABC-123`、それ以外は `PR #12` / `MR !12` / `Issue #12`。
+  - エージェント・worker のノード: そのセッションのワークスペースのもの。ボットのノード: ボットのホームのものだけ（全セッション分はまとめない）。
+  - IN FLIGHT / RECENT の行: 受け手のもの。NEEDS YOU の行: エージェントはそのワークスペースのもの、ボットの Item は Item のリンクにある PR。
+  - 下線のあるバッジはクリック（または Tab で選んで Enter / Space）でブラウザに開く（`orca.shell.openExternal`。初めてのホストは Orca が確認を出す）。行を選んだときの Orca 内への移動は起きない。URL の無い参照は押せないバッジになる。デモデータのバッジは押せない。
+  - 出るのは Orca がワークスペースに持っている参照だけ。ブランチ名や PR のタイトルからチケット番号を推測しない。Jira / Linear のチケットは、`orca reference add ABC-123 --worktree <セレクタ>`（Jira のキー）や `orca reference add https://linear.app/acme/issue/ABC-123 --worktree <セレクタ>`（URL）、または Orca の画面でワークスペースに付けたものだけが出る。
+  - 図では、ノードの幅に入らない分を `+N` にまとめる。
 - **IN FLIGHT**: 返事待ちの handoff / question / escalation と、走っている worker。0 件のときは「いま動いているエージェントはありません」と出す。
 - **RECENT**: 最近の依頼と報告（新しい順に 20 件）。
 - **N live**: IN FLIGHT の件数。
-- **Masked**: 押すと件名と NEEDS YOU の本文を伏せる（画面共有用）。設定に保存され、次に開いたときも続く。
+- **Masked**: 押すと件名と NEEDS YOU の本文、チケットのバッジを伏せる（画面共有用）。伏せている間、バッジは押せない。設定に保存され、次に開いたときも続く。
 - データを取れなかったときは、最後に取れた状態を残したまま「更新できませんでした」と何が失敗したかを出す。
 
 ### 返事待ちの判定
@@ -61,14 +67,15 @@ handoff / question / escalation は、次のどれかが来るまで IN FLIGHT �
 
 Orca の plugin API には orchestration の inbox や worker 一覧を読むメソッドが無いため、プラグインの worker が `orca` CLI を呼んで JSON を読む。パネルが見えている間だけ、設定の間隔（既定 5 秒）で読み直す。
 
-| 表示                                                  | コマンド                                                                                         | 使う項目                                                                                                                                                     |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`                                             | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                                    |
-| 走っている worker                                     | `orca orchestration worker-list --json`                                                          | `workspace` / `outcome` / `liveness` / `taskId`                                                                                                              |
-| worker の担当エージェント                             | `orca orchestration worker-show --dispatch <id> --full --json`                                   | `dispatch.assigneePaneKey`                                                                                                                                   |
-| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                                                        | `worktreeId` / `bot` / `botHome` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle` |
-| ボットのノード                                        | `orca bot list --json`                                                                           | `name`                                                                                                                                                       |
-| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `nextCursor`                                                                                                       |
+| 表示                                                  | コマンド                                                                                         | 使う項目                                                                                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`                                             | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                                                              |
+| 走っている worker                                     | `orca orchestration worker-list --json`                                                          | `workspace` / `outcome` / `liveness` / `taskId`                                                                                                                                        |
+| worker の担当エージェント                             | `orca orchestration worker-show --dispatch <id> --full --json`                                   | `dispatch.assigneePaneKey`                                                                                                                                                             |
+| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                                                        | `worktreeId` / `bot` / `botHome` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle`                           |
+| チケットのバッジ                                      | `orca worktree ps --json`（上と同じ呼び出し）                                                    | `linkedItems[]`（`provider` / `type` / `number` / `identifier` / `url`）/ `linkedPR`（`number` / `url`）/ `linkedIssue` / `linkedLinearIssue` / `linkedGitLabMR` / `linkedGitLabIssue` |
+| ボットのノード                                        | `orca bot list --json`                                                                           | `name`                                                                                                                                                                                 |
+| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `links[].pr` / `nextCursor`                                                                                                                  |
 
 - inbox のセッション ID は `worktree ps` の `orcaSessionId` と突き合わせて名前にする。ボットの worktree のセッション（チャット）は、ボットごとに 1 つのノードにまとめる。
 - worker の担当エージェントは、`worker-show` の `assigneePaneKey`（含まれるセッション ID）で `ps` のエージェントと突き合わせる。coordinator や別の worker と同じ worktree に居ても取り違えない。引くのは走っている worker と、終わった worker のうち新しい 20 件。dispatch の担当は変わらないので、引けた値は dispatch ごとに覚え、終わった後も使う。担当を引けていない worker は推測で結ばず、出さない。
@@ -77,6 +84,7 @@ Orca の plugin API には orchestration の inbox や worker 一覧を読むメ
 - ボットの一覧と Item はボットの数だけ CLI を呼ぶので、15 秒のあいだ使い回す。
 - Item はボットごとに最大 50 ページ（5000 件）まで読む。上限を超えて続きがあるときや、カーソルが繰り返されたときは、読めた分を出したうえで「更新できませんでした」の欄に未取得があることを出す。
 - NEEDS YOU の行を開くときは、`ps` の `worktreeId` を plugin API の `workspace.open` に渡す。ターミナルのエージェントは、`ps` の `paneKey`（`<tabId>:<leafId>`）を `orca terminal list --worktree <id> --json` の `tabId` / `leafId` と突き合わせて handle を引き、`terminal.focus` に渡す。引けないときやフォーカスできないときはワークスペースを開く。
+- チケットは `linkedItems` を先に、次に `linkedPR`（ブランチの PR）を見て、同じもの（同じ URL、または同じ provider と表示名）は 1 つにまとめる。`linkedIssue` などの古い単一スロットは、`linkedItems` に同じものが無いときだけ使う（URL が無いので押せない）。ブラウザに渡すのは `http(s)` の URL だけ。
 - `orca` は PATH から探し、見つからなければ macOS の `/Applications/Orca.app/Contents/Resources/bin/orca` を使う。設定の「orca CLI のパス」で変えられる。
 
 ### 取れないもの・できないこと
@@ -111,9 +119,10 @@ mise run build          # orca plugin types（.orca/types を作る）と tsc �
 `scripts/orca.sh` は PATH の `orca` を使う。無い Linux（CI など）では、公式リリースの orca-server を `.cache/orca` に取ってきて、SHA-256 を確かめてから使う。
 
 - `src/model.ts`: CLI の JSON を描く形にする純粋関数
+- `src/tickets.ts`: ワークスペースの参照をチケットのバッジにする純粋関数
 - `src/worker.ts`: CLI を呼ぶ worker
 - `src/demo.ts`: デモ表示とテストのダミーデータ
-- `panel/`: HTML パネル（`view.ts` は DOM に触らない描画関数）
+- `panel/`: HTML パネル（`view.ts` は DOM に触らない描画関数、`tickets.ts` はバッジの描画と押したときの処理）
 
 テストやスクリーンショットには実在のボット名・依頼文・セッション ID を入れず、`src/demo.ts` のダミーデータを使う。
 
