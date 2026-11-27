@@ -10,7 +10,7 @@
 
 ## 入れ方
 
-Orca 1.4.246 以降が必要。
+Orca 1.4.248 以降が必要（NEEDS YOU の行を開くのに使う `workspace:write` が入った版）。
 
 ```sh
 orca plugin install tqer39/orca-agent-map --json
