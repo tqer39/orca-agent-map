@@ -9,6 +9,7 @@ import {
   renderErrors,
   renderGraph,
   renderLists,
+  renderNeed,
 } from "./view";
 
 const NOW = Date.UTC(2030, 0, 1);
@@ -102,4 +103,31 @@ test("取得に失敗したら、いつの状態かと失敗の中身を出す",
   assert.ok(html.includes("2m 前に取れた状態"));
   assert.ok(html.includes("orca worktree ps: timeout"));
   assert.equal(renderErrors([], NOW, NOW), "");
+});
+
+test("開く先のある Need は選べる行にし、Item 番号を出す", () => {
+  const s = { ...snapshot, demo: false };
+  const need = {
+    id: `item:"x"<y>:3`,
+    node: "bot:Scheduler",
+    reason: "item" as const,
+    text: "見て",
+    at: 0,
+    target: { workspaceId: "folder:home" },
+    item: 3,
+  };
+  const html = renderNeed(s, need, false);
+  assert.ok(html.includes('role="button"'));
+  assert.ok(html.includes('tabindex="0"'));
+  assert.ok(html.includes('data-need="item:&quot;x&quot;&lt;y&gt;:3"'));
+  assert.ok(html.includes("#3"));
+  // Masked でも Item 番号は出す（件名ではないので、探す手がかりに残す）。
+  assert.ok(renderNeed(s, need, true).includes("#3"));
+
+  const { target: _, ...noTarget } = need;
+  assert.ok(!renderNeed(s, noTarget, false).includes("data-need"));
+  // デモのデータは Orca に無いワークスペースを指すので選べない。
+  assert.ok(
+    !renderNeed({ ...s, demo: true }, need, false).includes("data-need"),
+  );
 });

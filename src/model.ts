@@ -16,12 +16,26 @@ export interface MapNode {
 /** permission: 実行の許可待ち / input: 返事待ち / item: ボットの Item が Needs you / unread: 未読。 */
 export type NeedReason = "permission" | "input" | "item" | "unread";
 
+/**
+ * Need You の行を選んだときに Orca で開く先。workspaceId は `orca worktree ps` の worktreeId。
+ * paneKey はターミナルで動くエージェントだけに付け、そのペインまでフォーカスする
+ * （チャットのタブを選ぶ API は無いので、チャットはワークスペースを開くところまで）。
+ */
+export interface NeedTarget {
+  workspaceId: string;
+  paneKey?: string;
+}
+
 export interface Need {
   id: string;
   node: string;
   reason: NeedReason;
   text: string;
   at: number;
+  /** 開く先。ワークスペースが分からないときは無い（行を選べない）。 */
+  target?: NeedTarget;
+  /** reason が item のときの Item 番号。開けるのはボットのホームまでなので、行に出して探せるようにする。 */
+  item?: number;
 }
 
 export interface Flow {
@@ -114,6 +128,8 @@ export interface RawWorktree {
   branch?: string | null;
   createdAt?: number;
   unread?: boolean;
+  /** ボットのホーム（Home Chat が開く folder ワークスペース）なら true。 */
+  botHome?: boolean | null;
   agents?: RawAgent[];
 }
 
@@ -215,6 +231,17 @@ function agentNeed(
   return null;
 }
 
+/** チャット（structured agent session）のペイン。ターミナルではないので terminal.focus の対象外。 */
+const CHAT_PANE = /^structured-agent-session-/;
+
+function agentTarget(wt: RawWorktree, agent: RawAgent): NeedTarget | undefined {
+  if (!wt.worktreeId) return undefined;
+  const pane = agent.paneKey;
+  return pane && !CHAT_PANE.test(pane)
+    ? { workspaceId: wt.worktreeId, paneKey: pane }
+    : { workspaceId: wt.worktreeId };
+}
+
 function itemTime(value: number | string | undefined): number {
   if (typeof value === "number") return value;
   const at = Date.parse(value ?? "");
@@ -290,14 +317,29 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
         state: toState(agent.activity?.status ?? agent.state),
       });
       const need = agentNeed(agent, wt.unread === true);
-      if (need) needs.push({ id: `agent:${session}`, node: id, ...need });
+      if (need) {
+        const target = agentTarget(wt, agent);
+        needs.push({
+          id: `agent:${session}`,
+          node: id,
+          ...need,
+          ...(target ? { target } : {}),
+        });
+      }
     }
   }
+
+  // Item の画面を開く API は無いので、Item はボットのホームを開く。
+  const homeOf = new Map<string, string>();
+  for (const wt of raw.worktrees)
+    if (wt.bot && wt.botHome === true && wt.worktreeId)
+      homeOf.set(wt.bot, wt.worktreeId);
 
   for (const item of raw.items) {
     if (item.status !== "needs_you" && item.status !== "needs-you") continue;
     const node = botNode(item.bot);
     addNode(node, { label: item.bot, kind: "bot", state: "unknown" });
+    const home = homeOf.get(item.bot);
     needs.push({
       id: `item:${item.bot}:${item.number ?? item.title}`,
       node,
@@ -305,6 +347,8 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
       text:
         firstLine(item.question?.text) || firstLine(item.title) || "Needs you",
       at: itemTime(item.updatedAt),
+      ...(home ? { target: { workspaceId: home } } : {}),
+      ...(typeof item.number === "number" ? { item: item.number } : {}),
     });
   }
   needs.sort(

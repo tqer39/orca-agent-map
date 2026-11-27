@@ -205,6 +205,22 @@
         padding: 5px 0;
         border-top: 1px solid var(--orca-border);
       }
+      .row.openable {
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .row.openable:hover {
+        background: color-mix(in srgb, var(--orca-foreground) 6%, transparent);
+      }
+      .row.openable:focus-visible {
+        outline: 2px solid var(--orca-ring);
+        outline-offset: -2px;
+      }
+      .item-no {
+        color: var(--orca-muted-foreground);
+        font-size: 10px;
+        white-space: nowrap;
+      }
       .row.live .route::before {
         content: '';
         display: inline-block;

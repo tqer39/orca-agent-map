@@ -369,3 +369,80 @@ test("終わった dispatch は担当キーで結び、ペインが消えた wor
     [["ctx_a", "coordinator", "worker-a"]],
   );
 });
+
+test("Need You の行に開く先を付ける（チャットはワークスペース、ターミナルはペインまで）", () => {
+  const s = buildSnapshot(
+    {
+      messages: [],
+      workers: [],
+      worktrees: [
+        {
+          worktreeId: "repo::/w/chat",
+          agents: [
+            {
+              orcaSessionId: "chat",
+              paneKey: "structured-agent-session-chat:tab1",
+              activity: { status: "waiting" },
+            },
+          ],
+        },
+        {
+          worktreeId: "repo::/w/term",
+          agents: [
+            {
+              orcaSessionId: "term",
+              paneKey: "tab2:leaf2",
+              activity: { status: "blocked" },
+            },
+          ],
+        },
+        {
+          worktreeId: "folder:home-1",
+          bot: "Home",
+          botHome: true,
+          agents: [],
+        },
+        // ボットの名前が付いた worktree でも、ホームでないものは開く先にしない。
+        { worktreeId: "repo::/w/side", bot: "Home", agents: [] },
+      ],
+      bots: ["Home", "Homeless"],
+      items: [
+        { bot: "Home", number: 7, title: "見て", status: "needs_you" },
+        { bot: "Homeless", number: 8, title: "見て", status: "needs-you" },
+      ],
+    },
+    NOW,
+  );
+  const byId = new Map(s.needsYou.map((n) => [n.id, n]));
+  assert.deepEqual(byId.get("agent:term")?.target, {
+    workspaceId: "repo::/w/term",
+    paneKey: "tab2:leaf2",
+  });
+  assert.deepEqual(byId.get("agent:chat")?.target, {
+    workspaceId: "repo::/w/chat",
+  });
+  assert.deepEqual(byId.get("item:Home:7")?.target, {
+    workspaceId: "folder:home-1",
+  });
+  assert.equal(byId.get("item:Home:7")?.item, 7);
+  assert.equal(byId.get("item:Homeless:8")?.target, undefined);
+  assert.equal(byId.get("item:Homeless:8")?.item, 8);
+});
+
+test("worktreeId の無いエージェントの Need には開く先を付けない", () => {
+  const s = buildSnapshot(
+    {
+      messages: [],
+      workers: [],
+      worktrees: [
+        {
+          agents: [{ orcaSessionId: "x", activity: { status: "waiting" } }],
+        },
+      ],
+      bots: [],
+      items: [],
+    },
+    NOW,
+  );
+  assert.equal(s.needsYou[0]?.target, undefined);
+});

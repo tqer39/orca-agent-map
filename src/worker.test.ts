@@ -1,10 +1,13 @@
-import { assert, mockHost, mountWorker, test } from "orca/testing";
+import { assert, hostError, mockHost, mountWorker, test } from "orca/testing";
+import type { OrcaWorkerApi } from "orca/worker";
 import { demoSources } from "./demo";
 import * as main from "./worker";
 import {
   botsReader,
   createLoader,
   needsYouItems,
+  openTarget,
+  parseTarget,
   type RunCli,
   workersReader,
 } from "./worker";
@@ -280,4 +283,125 @@ test("未取得のある Item は読めた分を出し、errors にも載せる"
   assert.equal(snapshot.needsYou.length, 50);
   assert.equal(snapshot.errors.length, 1);
   assert.match(snapshot.errors[0], /^orca bot: Scheduler: .*50 ページを超えた/);
+});
+
+/** host.call を記録する偽の host。`results` に無いメソッドは失敗させる。 */
+function fakeHost(results: Record<string, unknown>, has = true) {
+  const calls: [string, unknown][] = [];
+  const host = {
+    has: () => has,
+    call: async (method: string, params: unknown) => {
+      calls.push([method, params]);
+      if (!(method in results)) throw hostError("action_failed", method);
+      return results[method];
+    },
+  } as unknown as OrcaWorkerApi["host"];
+  return { host, calls };
+}
+
+const terminals: RunCli = async (args) => {
+  assert.deepEqual(args, ["terminal", "list", "--worktree", "id:repo::/w"]);
+  return {
+    terminals: [
+      { handle: "term_other", worktreeId: "repo::/x", tabId: "t", leafId: "l" },
+      { handle: "term_1", worktreeId: "repo::/w", tabId: "t", leafId: "l" },
+    ],
+  };
+};
+
+test("ターミナルのエージェントは、そのペインのターミナルにフォーカスする", async () => {
+  const { host, calls } = fakeHost({ "terminal.focus": { focused: true } });
+  const result = await openTarget(host, terminals, {
+    workspaceId: "repo::/w",
+    paneKey: "t:l",
+  });
+  assert.deepEqual(result, { opened: true, pane: true });
+  assert.deepEqual(calls, [["terminal.focus", { terminalId: "term_1" }]]);
+});
+
+test("ペインが見つからない・フォーカスできないときはワークスペースを開く", async () => {
+  for (const [paneKey, focused] of [
+    ["gone:pane", true],
+    ["t:l", false],
+  ] as const) {
+    const { host, calls } = fakeHost({
+      "terminal.focus": { focused },
+      "workspace.open": { opened: true },
+    });
+    const result = await openTarget(host, terminals, {
+      workspaceId: "repo::/w",
+      paneKey,
+    });
+    assert.deepEqual(result, { opened: true, pane: false });
+    assert.deepEqual(calls.at(-1), [
+      "workspace.open",
+      { workspaceId: "repo::/w" },
+    ]);
+  }
+});
+
+test("CLI が失敗しても、terminal.focus の無い Orca でも、ワークスペースは開く", async () => {
+  const broken: RunCli = async () => {
+    throw new Error("timeout");
+  };
+  const a = fakeHost({ "workspace.open": { opened: true } });
+  await openTarget(a.host, broken, { workspaceId: "repo::/w", paneKey: "t:l" });
+  assert.deepEqual(a.calls, [["workspace.open", { workspaceId: "repo::/w" }]]);
+
+  const b = fakeHost({ "workspace.open": { opened: true } }, false);
+  let ran = false;
+  await openTarget(
+    b.host,
+    async () => {
+      ran = true;
+      return {};
+    },
+    { workspaceId: "repo::/w", paneKey: "t:l" },
+  );
+  assert.equal(ran, false);
+  assert.deepEqual(b.calls, [["workspace.open", { workspaceId: "repo::/w" }]]);
+});
+
+test("ボットのホーム（folder ワークスペース）は folder: のセレクタでターミナルを引く", async () => {
+  const { host } = fakeHost({ "workspace.open": { opened: true } });
+  const seen: string[][] = [];
+  await openTarget(
+    host,
+    async (args) => {
+      seen.push(args);
+      return { terminals: [] };
+    },
+    { workspaceId: "folder:home", paneKey: "t:l" },
+  );
+  assert.deepEqual(seen, [["terminal", "list", "--worktree", "folder:home"]]);
+});
+
+test("パネルから来た開く先は確かめてから使う", () => {
+  assert.deepEqual(parseTarget({ workspaceId: "w" }), { workspaceId: "w" });
+  assert.deepEqual(parseTarget({ workspaceId: "w", paneKey: "p" }), {
+    workspaceId: "w",
+    paneKey: "p",
+  });
+  for (const bad of [null, {}, { workspaceId: "" }, { workspaceId: 1 }]) {
+    assert.throws(() => parseTarget(bad), /workspaceId/);
+  }
+  assert.throws(() => parseTarget({ workspaceId: "w", paneKey: 1 }), /paneKey/);
+});
+
+test("map.open はワークスペースを開き、Orca が受け付ける呼び方をする", async () => {
+  const host = mockHost({ results: { "workspace.open": { opened: true } } });
+  const worker = await mountWorker(main, { host });
+  const result = await worker.request("map.open", {
+    workspaceId: "folder:home",
+  });
+  assert.deepEqual(result, { opened: true, pane: false });
+  assert.deepEqual(host.callsOf("workspace.open"), [
+    { workspaceId: "folder:home" },
+  ]);
+  assert.deepEqual(worker.refusals, []);
+  await assert.rejects(
+    worker.request("map.open", { workspaceId: "" } as never),
+    /workspaceId/,
+  );
+  await worker.deactivate();
 });

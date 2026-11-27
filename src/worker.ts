@@ -6,12 +6,13 @@ import type { OrcaWorkerApi } from "orca/worker";
 import { demoSources } from "./demo";
 import {
   buildSnapshot,
+  type NeedTarget,
   type RawItem,
   type RawSources,
   type RawWorker,
   type Snapshot,
 } from "./model";
-import "./protocol";
+import type { OpenResult } from "./protocol";
 
 export type RunCli = (args: string[]) => Promise<unknown>;
 
@@ -270,20 +271,107 @@ export function createLoader(run: RunCli): (now: number) => Promise<Snapshot> {
   };
 }
 
+/** `orca terminal list --json` の terminals[]（使う項目だけ）。 */
+interface RawTerminal {
+  handle?: string;
+  worktreeId?: string;
+  tabId?: string;
+  leafId?: string;
+}
+
+function invalidTarget(message: string): Error {
+  return Object.assign(new Error(message), { code: "invalid_params" });
+}
+
+/** パネルから来た開く先を確かめる。パネルの入力はそのまま信じない。 */
+export function parseTarget(input: unknown): NeedTarget {
+  const value = (input ?? {}) as Record<string, unknown>;
+  const { workspaceId, paneKey } = value;
+  if (typeof workspaceId !== "string" || !workspaceId)
+    throw invalidTarget("workspaceId がありません");
+  if (paneKey !== undefined && (typeof paneKey !== "string" || !paneKey))
+    throw invalidTarget("paneKey が文字列ではありません");
+  return paneKey ? { workspaceId, paneKey } : { workspaceId };
+}
+
+/** worktree ps の worktreeId を、CLI の --worktree に渡すセレクタにする。 */
+function worktreeSelector(workspaceId: string): string {
+  return workspaceId.startsWith("folder:") ? workspaceId : `id:${workspaceId}`;
+}
+
+/**
+ * ペインの paneKey（`<tabId>:<leafId>`）から、terminal.focus に渡すターミナルの handle を探す。
+ * Orca の plugin API にはペインからターミナルを引くメソッドが無いので、CLI の terminal list で引く。
+ */
+export async function terminalOf(
+  run: RunCli,
+  target: NeedTarget,
+): Promise<string | null> {
+  if (!target.paneKey) return null;
+  const terminals = list<RawTerminal>(
+    await run([
+      "terminal",
+      "list",
+      "--worktree",
+      worktreeSelector(target.workspaceId),
+    ]),
+    "terminals",
+  );
+  const found = terminals.find(
+    (t) =>
+      t.worktreeId === target.workspaceId &&
+      t.handle &&
+      `${t.tabId}:${t.leafId}` === target.paneKey,
+  );
+  return found?.handle ?? null;
+}
+
+/**
+ * Need You の行の開く先を表示する。ターミナルのエージェントはペインまでフォーカスし、
+ * 引けない・フォーカスできないとき（ペインが閉じた等）とチャットは、ワークスペースを開く。
+ */
+export async function openTarget(
+  host: OrcaWorkerApi["host"],
+  run: RunCli,
+  target: NeedTarget,
+): Promise<OpenResult> {
+  if (target.paneKey && host.has("terminal.focus")) {
+    try {
+      const terminalId = await terminalOf(run, target);
+      if (terminalId) {
+        const { focused } = await host.call("terminal.focus", { terminalId });
+        if (focused) return { opened: true, pane: true };
+      }
+    } catch {
+      // ペインまで行けなくても、ワークスペースは開く。
+    }
+  }
+  await host.call("workspace.open", { workspaceId: target.workspaceId });
+  return { opened: true, pane: false };
+}
+
 export default function activate(orca: OrcaWorkerApi): void {
   let cached: { at: number; snapshot: Promise<Snapshot> } | null = null;
   let loader: {
     path: string;
+    run: RunCli;
     load: (now: number) => Promise<Snapshot>;
   } | null = null;
+
+  const loaderFor = async () => {
+    const settings = await orca.settings.get();
+    const path = typeof settings.orcaPath === "string" ? settings.orcaPath : "";
+    if (loader?.path !== path) {
+      const run = cliRunner(path);
+      loader = { path, run, load: createLoader(run) };
+    }
+    return { settings, loader };
+  };
 
   orca.panels.handle("map.snapshot", async () => {
     const now = Date.now();
     if (cached && now - cached.at < CACHE_MS) return cached.snapshot;
-    const settings = await orca.settings.get();
-    const path = typeof settings.orcaPath === "string" ? settings.orcaPath : "";
-    if (loader?.path !== path)
-      loader = { path, load: createLoader(cliRunner(path)) };
+    const { settings, loader } = await loaderFor();
     const snapshot =
       settings.demo === true
         ? Promise.resolve({
@@ -293,5 +381,11 @@ export default function activate(orca: OrcaWorkerApi): void {
         : loader.load(now);
     cached = { at: now, snapshot };
     return snapshot;
+  });
+
+  orca.panels.handle("map.open", async (input) => {
+    const target = parseTarget(input);
+    const { loader } = await loaderFor();
+    return openTarget(orca.host, loader.run, target);
   });
 }

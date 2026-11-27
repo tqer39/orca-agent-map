@@ -17,6 +17,13 @@ let snapshot: Snapshot | null = null;
 let lastOkAt: number | null = null;
 let masked = false;
 let refreshMs = 5000;
+/** Need You の行を開けなかったときの理由。次に開けるまで表示する。 */
+let openError: string | null = null;
+
+function errorText(error: unknown): string {
+  const e = error as { code?: string; message?: string };
+  return `${e.code ?? "error"}: ${e.message ?? ""}`;
+}
 
 function render(): void {
   maskEl.setAttribute("aria-pressed", String(masked));
@@ -31,9 +38,46 @@ function render(): void {
   graphEl.innerHTML = snapshot.nodes.length
     ? renderGraph(snapshot, Math.max(240, graphEl.clientWidth))
     : '<p class="empty">ボットもやりとりもまだありません</p>';
+  // 描き直すと行が作り直されるので、キーボードで選んでいた行にフォーカスを戻す。
+  const focused = (document.activeElement as HTMLElement | null)?.dataset?.need;
   listsEl.innerHTML = renderLists(snapshot, masked);
-  errorsEl.innerHTML = renderErrors(snapshot.errors, lastOkAt, Date.now());
+  if (focused)
+    listsEl.querySelectorAll<HTMLElement>("[data-need]").forEach((row) => {
+      if (row.dataset.need === focused) row.focus();
+    });
+  const errors = openError ? [...snapshot.errors, openError] : snapshot.errors;
+  errorsEl.innerHTML = renderErrors(errors, lastOkAt, Date.now());
 }
+
+async function openNeed(id: string): Promise<void> {
+  const target = snapshot?.needsYou.find((n) => n.id === id)?.target;
+  if (!target) return;
+  try {
+    await orca.plugin.request("map.open", target);
+    openError = null;
+  } catch (error) {
+    openError = `Orca で開けませんでした（${errorText(error)}）`;
+  }
+  render();
+}
+
+function needOf(event: Event): string | undefined {
+  return (event.target as Element | null)?.closest<HTMLElement>("[data-need]")
+    ?.dataset.need;
+}
+
+listsEl.addEventListener("click", (event) => {
+  const id = needOf(event);
+  if (id) void openNeed(id);
+});
+
+listsEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const id = needOf(event);
+  if (!id) return;
+  event.preventDefault();
+  void openNeed(id);
+});
 
 async function load(): Promise<void> {
   try {
@@ -41,8 +85,7 @@ async function load(): Promise<void> {
     if (!snapshot.errors.length) lastOkAt = snapshot.at;
   } catch (error) {
     // worker ごと答えられないときも、最後に描いた状態は残す。
-    const e = error as { code?: string; message?: string };
-    const errors = [`${e.code ?? "error"}: ${e.message ?? ""}`];
+    const errors = [errorText(error)];
     if (snapshot) snapshot = { ...snapshot, errors };
     else {
       graphEl.innerHTML =
