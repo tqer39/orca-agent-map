@@ -142,3 +142,61 @@ test("ボットのノードはホームの worktree のチケットだけ（他�
     { label: "ABC-202", provider: "linear" },
   ]);
 });
+
+test("別のリポジトリの同じ番号の PR は、URL が違えば両方残す", () => {
+  const a = "https://github.example.com/demo/a/pull/7";
+  const b = "https://github.example.com/demo/b/pull/7";
+  assert.deepEqual(
+    itemTickets([
+      { pr: { number: 7, url: a } },
+      { pr: { number: 7, url: b } },
+      { pr: { number: 7, url: a } },
+    ]),
+    [
+      { label: "PR #7", provider: "github", url: a },
+      { label: "PR #7", provider: "github", url: b },
+    ],
+  );
+  // worktree の参照でも同じ。ブランチの PR（linkedPR）は同じ URL のものにまとまる。
+  const pr = (url: string) => ({
+    provider: "github",
+    type: "pr",
+    number: 7,
+    url,
+  });
+  assert.deepEqual(
+    worktreeTickets({
+      linkedItems: [pr(a), pr(b)],
+      linkedPR: { number: 7, url: b },
+    }).map((t) => t.url),
+    [a, b],
+  );
+});
+
+test("URL の無い参照は、リポジトリが違うと分かれば別のチケットにする", () => {
+  const issue = (repoId?: string, url?: string) => ({
+    provider: "github",
+    type: "issue",
+    number: 5,
+    repoId,
+    url,
+  });
+  assert.equal(
+    worktreeTickets({ linkedItems: [issue("repo-a"), issue("repo-b")] }).length,
+    2,
+  );
+  // リポジトリの分からない古いスロットは、同じ名前の参照が既にあれば足さない。
+  assert.equal(
+    worktreeTickets({
+      linkedItems: [issue("repo-a"), issue("repo-b")],
+      linkedIssue: 5,
+    }).length,
+    2,
+  );
+  // URL の無いまま載っていた参照には、後から来た同じ参照の URL を補う。
+  const url = "https://github.example.com/demo/a/issues/5";
+  assert.deepEqual(
+    worktreeTickets({ linkedItems: [issue("repo-a"), issue("repo-a", url)] }),
+    [{ label: "Issue #5", provider: "github", url }],
+  );
+});

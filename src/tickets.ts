@@ -17,6 +17,7 @@ export interface RawLinkedItem {
   identifier?: string | null;
   title?: string | null;
   url?: string | null;
+  repoId?: string | null;
 }
 
 /** `orca worktree ps --json` の worktree のうち、参照を持つ項目。 */
@@ -51,33 +52,59 @@ export function ticketLabel(item: RawLinkedItem): string | null {
   return format && numbered ? format(item.number as number) : null;
 }
 
-function toTicket(item: RawLinkedItem): Ticket | null {
+interface Entry {
+  ticket: Ticket;
+  /** linkedItems の repoId。古い単一スロットと linkedPR には無い。 */
+  repo?: string;
+}
+
+function toEntry(item: RawLinkedItem): Entry | null {
   const label = ticketLabel(item);
   if (!label) return null;
   // ブラウザに渡すのは http(s) だけにする。
   const url = /^https?:\/\//i.test(item.url ?? "") ? item.url : undefined;
   return {
-    label,
-    provider: item.provider || "unknown",
-    ...(url ? { url } : {}),
+    ticket: {
+      label,
+      provider: item.provider || "unknown",
+      ...(url ? { url } : {}),
+    },
+    ...(item.repoId ? { repo: item.repoId } : {}),
   };
 }
 
-/** 同じチケット（同じ URL、または同じ provider と表示名）は 1 つにまとめ、先に出たものを残す。 */
+/**
+ * 同じチケットは 1 つにまとめ、先に出たものを残す。URL が両方にあれば URL だけで見分ける
+ * （別のリポジトリの同じ番号の PR は、表示名が同じでも別のチケット）。片方に URL が無いときは
+ * provider・リポジトリ・表示名で見分け、リポジトリは両方に分かっているときだけ比べる。
+ */
 function merge(items: RawLinkedItem[]): Ticket[] {
-  const tickets: Ticket[] = [];
+  const entries: Entry[] = [];
   for (const item of items) {
-    const t = toTicket(item);
-    if (!t) continue;
-    const known = tickets.find(
+    const e = toEntry(item);
+    if (!e) continue;
+    const t = e.ticket;
+    if (t.url && entries.some((k) => k.ticket.url === t.url)) continue;
+    const alike = entries.filter(
       (k) =>
-        (k.url !== undefined && k.url === t.url) ||
-        (k.provider === t.provider && k.label === t.label),
+        k.ticket.provider === t.provider &&
+        k.ticket.label === t.label &&
+        (!k.repo || !e.repo || k.repo === e.repo),
     );
-    if (!known) tickets.push(t);
-    else if (!known.url && t.url) known.url = t.url;
+    if (!t.url) {
+      // URL の無い参照は、同じ名前のものが既にあれば足さない（どれと同じかは見分けられない）。
+      if (!alike.length) entries.push(e);
+      continue;
+    }
+    // URL の無いまま載っていた同じ名前の参照があれば、それに URL を補う。
+    const bare = alike.find((k) => !k.ticket.url);
+    if (!bare) entries.push(e);
+    else {
+      bare.ticket.url = t.url;
+      bare.repo ??= e.repo;
+    }
   }
-  return tickets;
+  return entries.map((e) => e.ticket);
 }
 
 /** worktree に付けた参照と、ブランチの PR。 */

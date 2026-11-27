@@ -284,19 +284,21 @@ export function renderNeed(
 ): string {
   const text = masked ? "••••••" : escapeHtml(n.text);
   // デモのデータは Orca に無いワークスペースを指すので、開けるようにしない。
+  // 行（li）は操作できる要素にせず、開く部分とチケットのバッジを兄弟として並べる
+  // （role="button" の中に別のボタンを入れない）。
   const open =
     n.target && !snapshot.demo
-      ? ` openable" role="button" tabindex="0" title="${NEED_OPEN_TITLE}" data-need="${escapeHtml(n.id)}`
-      : "";
+      ? `<div class="open" role="button" tabindex="0" title="${NEED_OPEN_TITLE}" data-need="${escapeHtml(n.id)}">`
+      : "<div>";
   const item =
     n.item !== undefined ? `<span class="item-no">#${n.item}</span>` : "";
   return (
-    `<li class="row needs${open}">` +
+    `<li class="row needs">${open}` +
     `<div class="route"><span class="needs-icon" aria-hidden="true">!</span>` +
     `<span class="who">${escapeHtml(labelOf(snapshot, n.node))}</span>${item}` +
     `<span class="kind needs ${n.reason}">${NEED_LABELS[n.reason]}</span>` +
     `<time>${n.at ? relativeTime(n.at, snapshot.at) : ""}</time></div>` +
-    `<div class="subject${masked ? " masked" : ""}">${text}</div>` +
+    `<div class="subject${masked ? " masked" : ""}">${text}</div></div>` +
     renderTickets(n.tickets, `need:${n.id}`, { masked, demo: snapshot.demo }) +
     `</li>`
   );
