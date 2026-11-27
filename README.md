@@ -16,7 +16,7 @@ Orca 1.4.246 以降が必要。
 orca plugin install tqer39/orca-agent-map --json
 ```
 
-このプラグインは worker（Node のプロセス）で `orca` CLI を呼ぶため、初回は承認が要る。上のコマンドは `approval_required` で止まり、許可する内容（`trusted-worker` で動くこと、`settings:own`）と `--approve <fingerprint>` 付きのコマンドを返すので、内容を確かめてからそのコマンドを実行する。
+このプラグインは worker（Node のプロセス）で `orca` CLI を呼ぶため、初回は承認が要る。上のコマンドは `approval_required` で止まり、許可する内容（`trusted-worker` で動くこと、`settings:own`、`workspace:write`）と `--approve <fingerprint>` 付きのコマンドを返すので、内容を確かめてからそのコマンドを実行する。
 
 入れたら右サイドバーのアクティビティバーに出る **Agent Map**（activity のアイコン）を開く。
 
@@ -36,6 +36,11 @@ orca plugin open local.agent-map --panel agent-map
 - **上部の図**: 左が主に送る側、右が主に受ける側。線は送り元から送り先への依頼で、色は種類（handoff / question / status / worker / escalation）。返事待ちや作業中の依頼は点線が流れる。同じ組の依頼は 1 本にまとめる。
 - **ノードの点**: 緑の点滅は作業中、黄は返事待ち、赤は許可待ち、灰は待機中（終わっている）。ボットは動いていなくても待機中のノードとして出る。worker は動いている間と、終わってから 15 分だけ出る。
 - **人の対応待ち（NEEDS YOU）**: 赤い枠と「!」の印のノード、ヘッダの「! N needs you」、一覧の一番上の **NEEDS YOU** 欄。理由は文字でも出す（許可待ち / 返事待ち / Needs you / 未読）。枠はゆっくり点滅する（OS で「視差効果を減らす」にしていると点滅しない）。
+- **NEEDS YOU の行を開く**: 行をクリック（または Tab で選んで Enter / Space）すると、その相手を Orca で開く。
+  - ターミナルで動くエージェント: そのペインまでフォーカスする（`terminal.focus`）。
+  - チャットのエージェント・worker: そのワークスペースを開く（`workspace.open`）。どのチャットのタブを出すかを選ぶ API は無いので、タブは Orca が前に出していたものになる。
+  - ボットの Item: Item の画面を開く API は無いので、ボットのホーム（Home Chat のあるワークスペース）を開く。行に Item 番号（`#12`）を出すので、`orca bot item show` などで探せる。
+  - 開けなかったときは「更新できませんでした」の欄に理由を出す。デモデータの行は開けない。
 - **IN FLIGHT**: 返事待ちの handoff / question / escalation と、走っている worker。0 件のときは「いま動いているエージェントはありません」と出す。
 - **RECENT**: 最近の依頼と報告（新しい順に 20 件）。
 - **N live**: IN FLIGHT の件数。
@@ -56,14 +61,14 @@ handoff / question / escalation は、次のどれかが来るまで IN FLIGHT �
 
 Orca の plugin API には orchestration の inbox や worker 一覧を読むメソッドが無いため、プラグインの worker が `orca` CLI を呼んで JSON を読む。パネルが見えている間だけ、設定の間隔（既定 5 秒）で読み直す。
 
-| 表示                                                  | コマンド                                                                                         | 使う項目                                                                                                                                         |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`                                             | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                        |
-| 走っている worker                                     | `orca orchestration worker-list --json`                                                          | `workspace` / `outcome` / `liveness` / `taskId`                                                                                                  |
-| worker の担当エージェント                             | `orca orchestration worker-show --dispatch <id> --full --json`                                   | `dispatch.assigneePaneKey`                                                                                                                       |
-| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                                                        | `worktreeId` / `bot` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle` |
-| ボットのノード                                        | `orca bot list --json`                                                                           | `name`                                                                                                                                           |
-| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `nextCursor`                                                                                           |
+| 表示                                                  | コマンド                                                                                         | 使う項目                                                                                                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 依頼の線、IN FLIGHT、RECENT                           | `orca orchestration inbox --json --full --limit 100`                                             | `from_handle` / `to_handle` / `type` / `subject` / `created_at` / `thread_id` / `payload`                                                                    |
+| 走っている worker                                     | `orca orchestration worker-list --json`                                                          | `workspace` / `outcome` / `liveness` / `taskId`                                                                                                              |
+| worker の担当エージェント                             | `orca orchestration worker-show --dispatch <id> --full --json`                                   | `dispatch.assigneePaneKey`                                                                                                                                   |
+| 名前、状態、worker の依頼元、許可待ち・返事待ち・未読 | `orca worktree ps --json`                                                                        | `worktreeId` / `bot` / `botHome` / `agents[].orcaSessionId` / `paneKey` / `parentPaneKey` / `activity.status` / `activity.unread` / `toolName` / `taskTitle` |
+| ボットのノード                                        | `orca bot list --json`                                                                           | `name`                                                                                                                                                       |
+| ボットの Needs you の Item                            | `orca bot item list --bot <名前> --status needs-you --limit 100 --json`（`--cursor` で全ページ） | `title` / `question.text` / `updatedAt` / `nextCursor`                                                                                                       |
 
 - inbox のセッション ID は `worktree ps` の `orcaSessionId` と突き合わせて名前にする。ボットの worktree のセッション（チャット）は、ボットごとに 1 つのノードにまとめる。
 - worker の担当エージェントは、`worker-show` の `assigneePaneKey`（含まれるセッション ID）で `ps` のエージェントと突き合わせる。coordinator や別の worker と同じ worktree に居ても取り違えない。引くのは走っている worker と、終わった worker のうち新しい 20 件。dispatch の担当は変わらないので、引けた値は dispatch ごとに覚え、終わった後も使う。担当を引けていない worker は推測で結ばず、出さない。
@@ -71,10 +76,12 @@ Orca の plugin API には orchestration の inbox や worker 一覧を読むメ
 - `ps` に居ない送り手は、`payload.botRequest.from` にボット名があればそれを、無ければセッション ID の先頭 6 文字を出す。
 - ボットの一覧と Item はボットの数だけ CLI を呼ぶので、15 秒のあいだ使い回す。
 - Item はボットごとに最大 50 ページ（5000 件）まで読む。上限を超えて続きがあるときや、カーソルが繰り返されたときは、読めた分を出したうえで「更新できませんでした」の欄に未取得があることを出す。
+- NEEDS YOU の行を開くときは、`ps` の `worktreeId` を plugin API の `workspace.open` に渡す。ターミナルのエージェントは、`ps` の `paneKey`（`<tabId>:<leafId>`）を `orca terminal list --worktree <id> --json` の `tabId` / `leafId` と突き合わせて handle を引き、`terminal.focus` に渡す。引けないときやフォーカスできないときはワークスペースを開く。
 - `orca` は PATH から探し、見つからなければ macOS の `/Applications/Orca.app/Contents/Resources/bin/orca` を使う。設定の「orca CLI のパス」で変えられる。
 
 ### 取れないもの・できないこと
 
+- NEEDS YOU の行から、特定のチャットのタブやボットの Item の画面は開けない（plugin API にも CLI にも無い）。開けるのはワークスペースと、ターミナルのペインまで。
 - Orca の起動時にパネルを開いた状態にする設定は、プラグインの manifest と API に無い。パネルを開く操作（`orca plugin open`）はできるが、起動時に自動で開く仕組みは無い。
 - 依頼の本文はパネルに出さない（件名だけ）。
 

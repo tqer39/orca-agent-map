@@ -249,16 +249,26 @@ export const NEED_LABELS: Record<NeedReason, string> = {
   unread: "未読",
 };
 
+/** 開ける行の title。Item はボットのホームまでしか開けないことも伝える。 */
+export const NEED_OPEN_TITLE = "Orca で開く（Item はボットのホームを開く）";
+
 export function renderNeed(
   snapshot: Snapshot,
   n: Need,
   masked: boolean,
 ): string {
   const text = masked ? "••••••" : escapeHtml(n.text);
+  // デモのデータは Orca に無いワークスペースを指すので、開けるようにしない。
+  const open =
+    n.target && !snapshot.demo
+      ? ` openable" role="button" tabindex="0" title="${NEED_OPEN_TITLE}" data-need="${escapeHtml(n.id)}`
+      : "";
+  const item =
+    n.item !== undefined ? `<span class="item-no">#${n.item}</span>` : "";
   return (
-    `<li class="row needs">` +
+    `<li class="row needs${open}">` +
     `<div class="route"><span class="needs-icon" aria-hidden="true">!</span>` +
-    `<span class="who">${escapeHtml(labelOf(snapshot, n.node))}</span>` +
+    `<span class="who">${escapeHtml(labelOf(snapshot, n.node))}</span>${item}` +
     `<span class="kind needs ${n.reason}">${NEED_LABELS[n.reason]}</span>` +
     `<time>${n.at ? relativeTime(n.at, snapshot.at) : ""}</time></div>` +
     `<div class="subject${masked ? " masked" : ""}">${text}</div></li>`
