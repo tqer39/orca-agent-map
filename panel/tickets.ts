@@ -18,16 +18,19 @@ interface Badge {
   open: boolean;
 }
 
-/** `scope` は描き直した後にフォーカスを戻すための、バッジの置き場所（行やノード）の名前。 */
+/**
+ * `scope` は描き直した後にフォーカスを戻すための、バッジの置き場所（行やノード）の名前。
+ * 並びが変わっても同じチケットに戻せるよう、data-ticket には順番ではなく URL を入れる。
+ */
 function badges(tickets: Ticket[], scope: string, view: TicketView): Badge[] {
-  return tickets.map((t, i) => {
+  return tickets.map((t) => {
     const url = view.masked || view.demo ? undefined : t.url;
     return {
       text: view.masked ? MASK : t.label,
       open: url !== undefined,
       attrs:
         url !== undefined
-          ? ` data-ticket="${esc(`${scope}#${i}`)}" data-ticket-url="${esc(url)}" data-provider="${esc(t.provider)}"`
+          ? ` data-ticket="${esc(`${scope}#${url}`)}" data-ticket-url="${esc(url)}" data-provider="${esc(t.provider)}"`
           : "",
     };
   });

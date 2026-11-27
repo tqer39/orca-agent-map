@@ -23,7 +23,7 @@ test("URL のあるバッジはボタン、無いバッジは押せない見た�
   const html = renderTickets(tickets, "need:x", live);
   assert.ok(
     html.includes(
-      `<button type="button" class="ticket" data-ticket="need:x#0" data-ticket-url="${URL_1}"`,
+      `<button type="button" class="ticket" data-ticket="need:x#${URL_1}" data-ticket-url="${URL_1}"`,
     ),
   );
   assert.ok(html.includes('<span class="ticket static">PR #12</span>'));
@@ -64,11 +64,11 @@ test("デモ表示のバッジは押せない", () => {
 test("一覧: 依頼の行は受け手の、NEEDS YOU の行はその相手のチケットを出す", () => {
   const html = renderLists(snapshot, false);
   // Planner 宛ての依頼の行と、builder-a（許可待ち）と Item の行。
-  assert.ok(html.includes('data-ticket="flow:msg_demo_01#0"'));
+  assert.ok(html.includes(`data-ticket="flow:msg_demo_01#${URL_1}"`));
   assert.ok(html.includes(">ABC-124</button>"));
   assert.ok(html.includes(">PR #7</button>"));
   // チケットの無い相手の行には何も足さない。
-  assert.ok(!html.includes('data-ticket="flow:msg_demo_03#0"'));
+  assert.ok(!html.includes('data-ticket="flow:msg_demo_03#'));
 });
 
 test("図: ノードの下にバッジを出し、バッジの段だけ高くする", () => {
