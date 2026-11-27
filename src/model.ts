@@ -268,7 +268,8 @@ function agentTarget(wt: RawWorktree, agent: RawAgent): NeedTarget | undefined {
 function linkUrl(item: RawItem): string | undefined {
   for (const link of item.links ?? []) {
     const url = link.pr?.url ?? link.url;
-    if (typeof url === "string" && /^https?:\/\//.test(url)) return url;
+    // スキームは大文字小文字を区別しない（tickets.ts と同じ判定）。
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
   }
   return undefined;
 }

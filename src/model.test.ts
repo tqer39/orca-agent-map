@@ -511,6 +511,7 @@ test("Item は http(s) のリンクだけを持ち、ファイルなどのリン
           { kind: "url", url: "https://example.com/demo/2" },
         ]),
         item(3, [{ kind: "url", url: "javascript:alert(1)" }]),
+        item(4, [{ kind: "url", url: "HTTPS://example.com/demo/4" }]),
       ],
     },
     NOW,
@@ -519,6 +520,7 @@ test("Item は http(s) のリンクだけを持ち、ファイルなどのリン
   assert.equal(byItem.get(1)?.url, "https://example.com/demo/pull/1");
   assert.equal(byItem.get(2)?.url, "https://example.com/demo/2");
   assert.equal(byItem.get(3)?.url, undefined);
+  assert.equal(byItem.get(4)?.url, "HTTPS://example.com/demo/4");
   // Orca で開く先（ボットのホーム）が無いので、target は無い。
   assert.equal(byItem.get(1)?.target, undefined);
 });
