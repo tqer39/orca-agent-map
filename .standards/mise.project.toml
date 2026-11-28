@@ -28,3 +28,9 @@ run = "pnpm run test"
 
 [tasks."repo:build"]
 run = "pnpm run build"
+
+# tsrs は実験版なので追加の検査にとどめ、lint・test・build にはつながない（必須の型チェックは build の tsc）。
+[tasks."typecheck:tsrs"]
+description = "Experimental Rust TypeScript check; tsc remains required"
+tools = { "npm:tsrs" = "0.18.0-ts7.1.0-dev.20260929" }
+run = "tsrs --noEmit"
