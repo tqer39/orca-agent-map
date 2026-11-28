@@ -327,26 +327,45 @@ export async function terminalOf(
 }
 
 /**
- * Need You の行の開く先を表示する。ターミナルのエージェントはペインまでフォーカスし、
+ * 行やノードの開く先を表示する。ターミナルのエージェントはペインまでフォーカスし、
  * 引けない・フォーカスできないとき（ペインが閉じた等）とチャットは、ワークスペースを開く。
  */
 export async function openTarget(
   host: OrcaWorkerApi["host"],
   run: RunCli,
   target: NeedTarget,
+  signal?: AbortSignal,
 ): Promise<OpenResult> {
+  // 要求が時間切れなどで中断されたら（Orca が signal を止める）、この先 host を呼ばない。
+  // 中断しても JavaScript の処理は止まらないので、host を呼ぶ前に毎回確かめる。
+  const stopIfAborted = () => {
+    if (signal?.aborted)
+      throw Object.assign(new Error("移動を中断しました"), {
+        code: "cancelled",
+      });
+  };
   if (target.paneKey && host.has("terminal.focus")) {
     try {
       const terminalId = await terminalOf(run, target);
+      stopIfAborted();
       if (terminalId) {
-        const { focused } = await host.call("terminal.focus", { terminalId });
+        const { focused } = await host.call(
+          "terminal.focus",
+          { terminalId },
+          { signal },
+        );
         if (focused) return { opened: true, pane: true };
       }
     } catch {
-      // ペインまで行けなくても、ワークスペースは開く。
+      // ペインまで行けなくても、ワークスペースは開く（中断されていたら開かない）。
     }
   }
-  await host.call("workspace.open", { workspaceId: target.workspaceId });
+  stopIfAborted();
+  await host.call(
+    "workspace.open",
+    { workspaceId: target.workspaceId },
+    { signal },
+  );
   return { opened: true, pane: false };
 }
 
@@ -383,9 +402,9 @@ export default function activate(orca: OrcaWorkerApi): void {
     return snapshot;
   });
 
-  orca.panels.handle("map.open", async (input) => {
+  orca.panels.handle("map.open", async (input, { signal }) => {
     const target = parseTarget(input);
     const { loader } = await loaderFor();
-    return openTarget(orca.host, loader.run, target);
+    return openTarget(orca.host, loader.run, target, signal);
   });
 }

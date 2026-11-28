@@ -45,7 +45,7 @@ test("バッジの文字と URL はエスケープする", () => {
 test("Masked ならバッジも伏せ、押せなくする", () => {
   for (const html of [
     renderTickets(tickets, "need:x", { masked: true, demo: false }),
-    renderLists(snapshot, true),
+    renderLists(snapshot, true, true),
     renderGraph(snapshot, 320, true),
   ]) {
     assert.ok(html.includes("•••"));
@@ -56,13 +56,13 @@ test("Masked ならバッジも伏せ、押せなくする", () => {
 });
 
 test("デモ表示のバッジは押せない", () => {
-  const html = renderLists({ ...snapshot, demo: true }, false);
+  const html = renderLists({ ...snapshot, demo: true }, false, true);
   assert.ok(html.includes('<span class="ticket static">ABC-123</span>'));
   assert.ok(!html.includes("data-ticket-url"));
 });
 
 test("一覧: 依頼の行は受け手の、NEEDS YOU の行はその相手のチケットを出す", () => {
-  const html = renderLists(snapshot, false);
+  const html = renderLists(snapshot, false, true);
   // Planner 宛ての依頼の行と、builder-a（許可待ち）と Item の行。
   assert.ok(html.includes(`data-ticket="flow:msg_demo_01#${URL_1}"`));
   assert.ok(html.includes(">ABC-124</button>"));
@@ -109,32 +109,21 @@ function fakeEvent(
   return { event, calls };
 }
 
-function handler(
-  result: { opened: boolean; reason?: string } = { opened: true },
-) {
+function handler() {
   const opened: string[] = [];
-  const reports: (string | null)[] = [];
-  const handle = ticketHandler({
-    openExternal: (url) => {
-      opened.push(url);
-      return Promise.resolve(result);
-    },
-    report: (text) => reports.push(text),
-  });
-  return { handle, opened, reports };
+  const handle = ticketHandler({ open: (url) => opened.push(url) });
+  return { handle, opened };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test("バッジのクリックは URL を開き、行のクリックには伝えない", async () => {
-  const { handle, opened, reports } = handler();
+test("バッジのクリックは URL を開き、行のクリックには伝えない", () => {
+  const { handle, opened } = handler();
   const { event, calls } = fakeEvent("click", { "data-ticket-url": URL_1 });
   handle(event);
-  // await を挟まず、クリックの中で呼ぶ。
+  // クリックの中で、移動の順番待ちに渡す（開けたかどうかは goer が出す）。
   assert.deepEqual(opened, [URL_1]);
   assert.deepEqual(calls, ["stop"]);
-  await tick();
-  assert.deepEqual(reports, [null]);
 });
 
 test("バッジ以外のクリックと、押せないバッジには何もしない", () => {
@@ -167,20 +156,4 @@ test("キーボード: button は click に任せ、図のバッジは Enter / S
   const tab = fakeEvent("keydown", attrs, "Tab", "g");
   handle(tab.event);
   assert.deepEqual(tab.calls, []);
-});
-
-test("開けなかったら理由を出し、取り消しは出さない", async () => {
-  const denied = handler({ opened: false, reason: "consent-unavailable" });
-  denied.handle(fakeEvent("click", { "data-ticket-url": URL_1 }).event);
-  const cancelled = handler({ opened: false, reason: "cancelled" });
-  cancelled.handle(fakeEvent("click", { "data-ticket-url": URL_1 }).event);
-  await tick();
-  assert.match(denied.reports[0] ?? "", /consent-unavailable/);
-  assert.deepEqual(cancelled.reports, [null]);
-
-  const reports: (string | null)[] = [];
-  ticketHandler({ report: (t) => reports.push(t) })(
-    fakeEvent("click", { "data-ticket-url": URL_1 }).event,
-  );
-  assert.match(reports[0] ?? "", /開けません/);
 });

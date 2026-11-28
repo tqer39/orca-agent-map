@@ -13,7 +13,7 @@ declare module "orca" {
   interface PluginRequests {
     /** Orca の inbox / worker-list / worktree ps を読み、描く形にして返す。 */
     "map.snapshot": { output: Snapshot };
-    /** Need You の行の開く先を Orca で表示する（workspace.open、ターミナルなら terminal.focus）。 */
+    /** 行やノードの開く先を Orca で表示する（workspace.open、ターミナルなら terminal.focus）。 */
     "map.open": { input: NeedTarget; output: OpenResult };
   }
 }

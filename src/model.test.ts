@@ -1,6 +1,6 @@
 import { assert, test } from "orca/testing";
 import { DEMO_IDS as ids, demoSources } from "./demo";
-import { buildSnapshot } from "./model";
+import { buildSnapshot, type RawItem } from "./model";
 
 const NOW = Date.UTC(2030, 0, 1, 12, 0, 0);
 
@@ -445,4 +445,82 @@ test("worktreeId の無いエージェントの Need には開く先を付けな
     NOW,
   );
   assert.equal(s.needsYou[0]?.target, undefined);
+});
+
+test("ノードの開く先: エージェントと worker はそのペインかワークスペース、ボットはホーム", () => {
+  const s = buildSnapshot(
+    {
+      messages: [],
+      workers: [],
+      worktrees: [
+        {
+          worktreeId: "repo::/w/term",
+          agents: [{ orcaSessionId: "term", paneKey: "tab2:leaf2" }],
+        },
+        {
+          worktreeId: "repo::/w/chat",
+          agents: [
+            {
+              orcaSessionId: "chat",
+              paneKey: "structured-agent-session-chat:leaf",
+            },
+          ],
+        },
+        // ワークスペースの分からないエージェントは開けない。
+        { agents: [{ orcaSessionId: "lost", paneKey: "tab9:leaf9" }] },
+        { worktreeId: "folder:home-1", bot: "Home", botHome: true, agents: [] },
+        // ボットの名前が付いた worktree でも、ホームでないものは開く先にしない。
+        {
+          worktreeId: "repo::/w/side",
+          bot: "Side",
+          agents: [{ orcaSessionId: "side", paneKey: "tab3:leaf3" }],
+        },
+      ],
+      bots: ["Home", "Side"],
+      items: [],
+    },
+    NOW,
+  );
+  assert.deepEqual(s.targets, {
+    term: { workspaceId: "repo::/w/term", paneKey: "tab2:leaf2" },
+    chat: { workspaceId: "repo::/w/chat" },
+    "bot:Home": { workspaceId: "folder:home-1" },
+  });
+});
+
+test("Item は http(s) のリンクだけを持ち、ファイルなどのリンクは持たない", () => {
+  const item = (number: number, links: RawItem["links"]) => ({
+    bot: "Away",
+    number,
+    title: "見て",
+    status: "needs_you",
+    links,
+  });
+  const s = buildSnapshot(
+    {
+      messages: [],
+      workers: [],
+      worktrees: [],
+      bots: [],
+      items: [
+        item(1, [
+          { kind: "pr", pr: { url: "https://example.com/demo/pull/1" } },
+        ]),
+        item(2, [
+          { kind: "file", url: "/tmp/demo.txt" },
+          { kind: "url", url: "https://example.com/demo/2" },
+        ]),
+        item(3, [{ kind: "url", url: "javascript:alert(1)" }]),
+        item(4, [{ kind: "url", url: "HTTPS://example.com/demo/4" }]),
+      ],
+    },
+    NOW,
+  );
+  const byItem = new Map(s.needsYou.map((n) => [n.item, n]));
+  assert.equal(byItem.get(1)?.url, "https://example.com/demo/pull/1");
+  assert.equal(byItem.get(2)?.url, "https://example.com/demo/2");
+  assert.equal(byItem.get(3)?.url, undefined);
+  assert.equal(byItem.get(4)?.url, "HTTPS://example.com/demo/4");
+  // Orca で開く先（ボットのホーム）が無いので、target は無い。
+  assert.equal(byItem.get(1)?.target, undefined);
 });

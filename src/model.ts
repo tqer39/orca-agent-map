@@ -26,7 +26,8 @@ export interface MapNode {
 export type NeedReason = "permission" | "input" | "item" | "unread";
 
 /**
- * Need You の行を選んだときに Orca で開く先。workspaceId は `orca worktree ps` の worktreeId。
+ * NEEDS YOU / IN FLIGHT / RECENT の行や図のノードを選んだときに Orca で開く先。
+ * workspaceId は `orca worktree ps` の worktreeId。
  * paneKey はターミナルで動くエージェントだけに付け、そのペインまでフォーカスする
  * （チャットのタブを選ぶ API は無いので、チャットはワークスペースを開くところまで）。
  */
@@ -47,6 +48,8 @@ export interface Need {
   item?: number;
   /** 行に出すチケット。agent はその worktree の参照、Item は links にある PR。 */
   tickets?: Ticket[];
+  /** Item に付いた PR などのリンク（http(s) だけ）。Orca で開く先が無いとき、ブラウザで開く。 */
+  url?: string;
 }
 
 export interface Flow {
@@ -73,6 +76,8 @@ export interface Snapshot {
   tickets: Record<string, Ticket[]>;
   errors: string[];
   demo: boolean;
+  /** ノード ID → Orca で開く先。図のノードと、IN FLIGHT / RECENT の行（受け手のノードを開く）が使う。 */
+  targets: Record<string, NeedTarget>;
 }
 
 /** `orca orchestration inbox --json --full` の 1 行（使う項目だけ）。 */
@@ -157,7 +162,7 @@ export interface RawItem {
   status?: string;
   question?: { text?: string } | null;
   updatedAt?: number | string;
-  links?: RawItemLink[] | null;
+  links?: (RawItemLink & { kind?: string; url?: string })[] | null;
 }
 
 export interface RawSources {
@@ -259,6 +264,16 @@ function agentTarget(wt: RawWorktree, agent: RawAgent): NeedTarget | undefined {
     : { workspaceId: wt.worktreeId };
 }
 
+/** Item に付いた最初の http(s) のリンク。ファイルなどのリンクはブラウザで開かない。 */
+function linkUrl(item: RawItem): string | undefined {
+  for (const link of item.links ?? []) {
+    const url = link.pr?.url ?? link.url;
+    // スキームは大文字小文字を区別しない（tickets.ts と同じ判定）。
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
+  }
+  return undefined;
+}
+
 function itemTime(value: number | string | undefined): number {
   if (typeof value === "number") return value;
   const at = Date.parse(value ?? "");
@@ -300,6 +315,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
   );
   const needs: Need[] = [];
   const tickets: Record<string, Ticket[]> = {};
+  const targets: Record<string, NeedTarget> = {};
   const nodeOf = (session: string) => nodeOfSession.get(session) ?? session;
 
   const addNode = (id: string, info: AgentInfo) => {
@@ -338,9 +354,11 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
         kind: bot ? "bot" : isWorker ? "worker" : "agent",
         state: toState(agent.activity?.status ?? agent.state),
       });
+      const target = agentTarget(wt, agent);
+      // ボットは複数のチャットを 1 つのノードにまとめるので、下でホームを開く先にする。
+      if (!bot && target) targets[id] = target;
       const need = agentNeed(agent, wt.unread === true);
       if (need) {
-        const target = agentTarget(wt, agent);
         needs.push({
           id: `agent:${session}`,
           node: id,
@@ -357,6 +375,8 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
   for (const wt of raw.worktrees)
     if (wt.bot && wt.botHome === true && wt.worktreeId)
       homeOf.set(wt.bot, wt.worktreeId);
+  for (const [bot, workspaceId] of homeOf)
+    targets[botNode(bot)] = { workspaceId };
 
   for (const item of raw.items) {
     if (item.status !== "needs_you" && item.status !== "needs-you") continue;
@@ -364,6 +384,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     addNode(node, { label: item.bot, kind: "bot", state: "unknown" });
     const home = homeOf.get(item.bot);
     const prs = itemTickets(item.links);
+    const url = linkUrl(item);
     needs.push({
       id: `item:${item.bot}:${item.number ?? item.title}`,
       node,
@@ -374,6 +395,7 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
       ...(home ? { target: { workspaceId: home } } : {}),
       ...(typeof item.number === "number" ? { item: item.number } : {}),
       ...(prs.length ? { tickets: prs } : {}),
+      ...(url ? { url } : {}),
     });
   }
   needs.sort(
@@ -510,5 +532,6 @@ export function buildSnapshot(raw: RawSources, now: number): Snapshot {
     tickets,
     errors: [],
     demo: false,
+    targets,
   };
 }

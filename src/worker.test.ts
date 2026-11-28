@@ -1,6 +1,7 @@
 import { assert, hostError, mockHost, mountWorker, test } from "orca/testing";
 import type { OrcaWorkerApi } from "orca/worker";
 import { demoSources } from "./demo";
+import { heldCli } from "./test-helpers";
 import * as main from "./worker";
 import {
   botsReader,
@@ -404,4 +405,93 @@ test("map.open はワークスペースを開き、Orca が受け付ける呼び
     /workspaceId/,
   );
   await worker.deactivate();
+});
+
+/**
+ * 本物の activate の map.open を、偽の orca で動かす。settings.get は hold() した回だけ
+ * release() まで答えない（要求が設定の読み込みで待たされている状態）。
+ */
+function activated() {
+  const handlers = new Map<
+    string,
+    (input: unknown, context: unknown) => Promise<unknown>
+  >();
+  const calls: unknown[] = [];
+  let holding = false;
+  const released: (() => void)[] = [];
+  const orca = {
+    panels: {
+      handle: (
+        name: string,
+        fn: (input: unknown, context: unknown) => Promise<unknown>,
+      ) => handlers.set(name, fn),
+    },
+    settings: {
+      get: () =>
+        holding
+          ? new Promise((resolve) => released.push(() => resolve({})))
+          : Promise.resolve({}),
+    },
+    host: {
+      has: () => true,
+      call: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+        return { opened: true };
+      },
+    },
+  } as unknown as OrcaWorkerApi;
+  main.default(orca);
+  const open = (input: unknown, signal = new AbortController().signal) =>
+    (handlers.get("map.open") as (i: unknown, c: unknown) => Promise<unknown>)(
+      input,
+      { panel: { id: "panel-1" }, signal },
+    );
+  return {
+    calls,
+    open,
+    hold: (on: boolean) => {
+      holding = on;
+    },
+    release: () => released.shift()?.(),
+  };
+}
+
+test("時間切れで中断された map.open は、待っていた設定の読み込みが終わっても host を呼ばない", async () => {
+  const w = activated();
+  const a = new AbortController();
+  w.hold(true);
+  const first = w.open({ workspaceId: "repo::/a" }, a.signal);
+  w.hold(false);
+  // A の要求が時間切れになり、Orca が signal を止める。その後で C を開く。
+  a.abort();
+  assert.deepEqual(await w.open({ workspaceId: "repo::/c" }), {
+    opened: true,
+    pane: false,
+  });
+  w.release();
+  await assert.rejects(first, (error: unknown) => {
+    return (error as { code?: string }).code === "cancelled";
+  });
+  assert.deepEqual(w.calls, [["workspace.open", { workspaceId: "repo::/c" }]]);
+});
+
+test("端末を引くあいだに中断されたら、CLI が成功しても失敗しても host を呼ばない", async () => {
+  for (const fails of [false, true]) {
+    const { host, calls } = fakeHost({
+      "terminal.focus": { focused: true },
+      "workspace.open": { opened: true },
+    });
+    const cli = heldCli(fails);
+    const abort = new AbortController();
+    const result = openTarget(
+      host,
+      cli.run,
+      { workspaceId: "repo::/w", paneKey: "t:l" },
+      abort.signal,
+    );
+    abort.abort();
+    cli.answer();
+    await assert.rejects(result, /中断/);
+    assert.deepEqual(calls, []);
+  }
 });
