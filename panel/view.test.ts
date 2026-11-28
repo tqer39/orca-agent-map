@@ -171,12 +171,12 @@ test("IN FLIGHT / RECENT の行は受け手のノードを開き、開く先の�
   const flows = [...s.inFlight, ...s.recent];
   const openable = flows.filter((f) => s.targets[f.to]);
   assert.ok(openable.length > 0 && openable.length < flows.length);
-  const keys = [...html.matchAll(/data-go="(node:[^"]+)"/g)].map((m) => m[1]);
+  const keys = [...html.matchAll(/data-go="(flow:[^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(
     keys,
-    openable.map((f) => `node:${f.to}`),
+    openable.map((f) => `flow:${f.id}`),
   );
-  assert.deepEqual(actionFor(s, `node:${openable[0].to}`, false), {
+  assert.deepEqual(actionFor(s, `flow:${openable[0].id}`, false), {
     kind: "orca",
     target: s.targets[openable[0].to],
   });

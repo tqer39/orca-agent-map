@@ -76,7 +76,14 @@ test("NEEDS YOU / IN FLIGHT / RECENT の行: 開く部分（div.open）とバッ
   const openers = els.filter((el) => "data-go" in el.attrs);
   assert.ok(flows.some((f) => !snapshot.targets[f.to]));
   assert.equal(openers.length, openableRows);
-  assert.ok(openers.some((el) => el.attrs["data-go"].startsWith("node:")));
+  assert.ok(openers.some((el) => el.attrs["data-go"].startsWith("flow:")));
+  // 行ごとに違うキー（依頼の行は依頼の ID）。同じ受け手の行が複数あっても重ならない。
+  const keys = openers.map((el) => el.attrs["data-go"]);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.ok(
+    new Set(flows.filter((f) => snapshot.targets[f.to]).map((f) => f.to)).size <
+      flows.filter((f) => snapshot.targets[f.to]).length,
+  );
   for (const open of openers) {
     assert.equal(open.tag, "div");
     assert.equal(open.attrs.class, "open");
@@ -142,26 +149,38 @@ test("描き直しても、フォーカスを戻すためのキーは同じ行�
   );
 });
 
-test("描き直した後、選んでいた行（同じ開く先が複数あれば同じ順番のもの）にフォーカスを戻す", () => {
+test("描き直して同じ受け手の行の並びが変わっても、選んでいた依頼の行にフォーカスを戻す", () => {
+  // 同じ受け手の依頼が 2 つある状態で、2 つめを選んでから並びを逆にして描き直す。
+  const sameTo = flows.filter(
+    (f) => f.to === flows[0].to && snapshot.targets[f.to],
+  );
+  assert.ok(sameTo.length >= 2);
+  const picked = `flow:${sameTo[1].id}`;
+  const draw = (s: typeof snapshot) =>
+    parse(renderLists(s, false, true))
+      .filter((el) => "data-go" in el.attrs)
+      .map((el) => ({
+        getAttribute: (name: string) => el.attrs[name] ?? null,
+        focus: () => focused.push(el.attrs["data-go"]),
+      }));
   const focused: string[] = [];
-  const el = (key: string, n: number) => ({
-    key,
-    n,
-    getAttribute: (name: string) => (name === "data-go" ? key : null),
-    focus: () => focused.push(`${key}#${n}`),
-  });
-  let drawn = [el("node:a", 0), el("node:b", 0), el("node:b", 1)];
+  let drawn = draw(snapshot);
   const container = {
     contains: (x: unknown) => drawn.includes(x as never),
     querySelectorAll: () => drawn,
   };
-  keepFocus(container, drawn[2], () => {
-    drawn = [el("node:b", 0), el("node:b", 1), el("node:a", 0)];
+  const active = drawn.find((el) => el.getAttribute("data-go") === picked);
+  keepFocus(container, active ?? null, () => {
+    drawn = draw({
+      ...snapshot,
+      inFlight: [...snapshot.inFlight].reverse(),
+      recent: [...snapshot.recent].reverse(),
+    });
   });
-  assert.deepEqual(focused, ["node:b#1"]);
+  assert.deepEqual(focused, [picked]);
   // 中に無い要素を選んでいたら、何もしない。
-  keepFocus(container, el("node:x", 0), () => {});
-  assert.deepEqual(focused, ["node:b#1"]);
+  keepFocus(container, { getAttribute: () => "flow:x", focus() {} }, () => {});
+  assert.deepEqual(focused, [picked]);
 });
 
 test("Masked でも行とノードは開けて、バッジだけ押せなくなる", () => {

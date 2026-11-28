@@ -189,7 +189,11 @@ export function goOf(
   return null;
 }
 
-/** 行やノードの data-go の値から、押したときにすることを引く。`need:<id>` か `node:<id>`。 */
+/**
+ * 行やノードの data-go の値から、押したときにすることを引く。`need:<id>`（NEEDS YOU の行）、
+ * `flow:<id>`（IN FLIGHT / RECENT の行。受け手のノードを開く）、`node:<id>`（図のノード）。
+ * 行ごとに違う値なので、描き直した後のフォーカスもこの値で同じ行に戻せる。
+ */
 export function actionFor(
   snapshot: Snapshot,
   key: string,
@@ -198,6 +202,15 @@ export function actionFor(
   if (key.startsWith("need:")) {
     const need = snapshot.needsYou.find((n) => n.id === key.slice(5));
     return need ? goOf(snapshot, need.target, need.url, external) : null;
+  }
+  if (key.startsWith("flow:")) {
+    const id = key.slice(5);
+    const flow = [...snapshot.inFlight, ...snapshot.recent].find(
+      (f) => f.id === id,
+    );
+    return flow
+      ? goOf(snapshot, snapshot.targets[flow.to], undefined, external)
+      : null;
   }
   if (key.startsWith("node:"))
     return goOf(snapshot, snapshot.targets[key.slice(5)], undefined, external);
@@ -301,7 +314,7 @@ export function renderRow(
   const subject = masked ? "••••••" : escapeHtml(f.subject || "（件名なし）");
   const to = labelOf(snapshot, f.to);
   // 依頼や報告が届いた先（受け手）を開く。
-  const key = `node:${f.to}`;
+  const key = `flow:${f.id}`;
   const go = actionFor(snapshot, key, false);
   return (
     `<li class="row${f.live ? " live" : ""}">${openPart(go, key, `${to} を Orca で開く`)}` +
