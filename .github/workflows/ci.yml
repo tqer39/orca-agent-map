@@ -27,10 +27,30 @@ jobs:
       - run: mise run bootstrap
       # check は lock の版の CLI で dev-standards check を行い、lint・format:check・test・build も実行する。
       - run: mise run check
+  # dev-standards が生成する dev-standards.yml の supply-chain と同じ検査。別のワークフローのジョブは
+  # needs で待てず、あちらの失敗は必須チェックに届かないので、ここでも実行して workflow-result に集約する。
+  # ツールの版と引数は dev-standards.yml に合わせる。監査の対象には、生成物でない ci.yml も加える。
+  security-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          version: 2026.10.24
+          install: false
+          cache: false
+      - name: ワークフローを監査する
+        run: mise exec aqua:zizmorcore/zizmor@1.32.0 -- zizmor --offline --min-severity medium .github/workflows
+      - name: 作業ツリーの秘密情報を検出する
+        if: ${{ !cancelled() }}
+        run: mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config .
   # main の ruleset は `workflow-result` を必須チェックにしている（terraform-github の標準保護）。
   # dev-standards が生成するジョブ名は `standards-check` なので、同じ検査をここで集約する。
   workflow-result:
-    needs: [verify]
+    needs: [verify, security-scan]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -38,8 +58,10 @@ jobs:
       - name: 全検証の成功を確認
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
+          SECURITY_SCAN_RESULT: ${{ needs.security-scan.result }}
         run: |
-          if [ "$VERIFY_RESULT" != success ]; then
-            echo "必要な CI ジョブが成功していません: $VERIFY_RESULT" >&2
+          # 失敗・キャンセル・スキップはどれも success でないので、ここで必須チェックを失敗にする。
+          if [ "$VERIFY_RESULT" != success ] || [ "$SECURITY_SCAN_RESULT" != success ]; then
+            echo "必要な CI ジョブが成功していません: verify=$VERIFY_RESULT security-scan=$SECURITY_SCAN_RESULT" >&2
             exit 1
           fi
