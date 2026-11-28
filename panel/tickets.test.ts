@@ -109,32 +109,21 @@ function fakeEvent(
   return { event, calls };
 }
 
-function handler(
-  result: { opened: boolean; reason?: string } = { opened: true },
-) {
+function handler() {
   const opened: string[] = [];
-  const reports: (string | null)[] = [];
-  const handle = ticketHandler({
-    openExternal: (url) => {
-      opened.push(url);
-      return Promise.resolve(result);
-    },
-    report: (text) => reports.push(text),
-  });
-  return { handle, opened, reports };
+  const handle = ticketHandler({ open: (url) => opened.push(url) });
+  return { handle, opened };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test("バッジのクリックは URL を開き、行のクリックには伝えない", async () => {
-  const { handle, opened, reports } = handler();
+test("バッジのクリックは URL を開き、行のクリックには伝えない", () => {
+  const { handle, opened } = handler();
   const { event, calls } = fakeEvent("click", { "data-ticket-url": URL_1 });
   handle(event);
-  // await を挟まず、クリックの中で呼ぶ。
+  // クリックの中で、移動の順番待ちに渡す（開けたかどうかは goer が出す）。
   assert.deepEqual(opened, [URL_1]);
   assert.deepEqual(calls, ["stop"]);
-  await tick();
-  assert.deepEqual(reports, [null]);
 });
 
 test("バッジ以外のクリックと、押せないバッジには何もしない", () => {
@@ -167,20 +156,4 @@ test("キーボード: button は click に任せ、図のバッジは Enter / S
   const tab = fakeEvent("keydown", attrs, "Tab", "g");
   handle(tab.event);
   assert.deepEqual(tab.calls, []);
-});
-
-test("開けなかったら理由を出し、取り消しは出さない", async () => {
-  const denied = handler({ opened: false, reason: "consent-unavailable" });
-  denied.handle(fakeEvent("click", { "data-ticket-url": URL_1 }).event);
-  const cancelled = handler({ opened: false, reason: "cancelled" });
-  cancelled.handle(fakeEvent("click", { "data-ticket-url": URL_1 }).event);
-  await tick();
-  assert.match(denied.reports[0] ?? "", /consent-unavailable/);
-  assert.deepEqual(cancelled.reports, [null]);
-
-  const reports: (string | null)[] = [];
-  ticketHandler({ report: (t) => reports.push(t) })(
-    fakeEvent("click", { "data-ticket-url": URL_1 }).event,
-  );
-  assert.match(reports[0] ?? "", /開けません/);
 });

@@ -117,16 +117,16 @@ interface TicketElement {
 }
 
 export interface TicketDeps {
-  /** `orca.shell.openExternal`。デスクトップ版でないと無い。 */
-  openExternal?: (url: string) => Promise<{ opened: boolean; reason?: string }>;
-  /** 開けなかった理由を出す。開けたら null で消す。 */
-  report: (text: string | null) => void;
+  /**
+   * バッジの URL を開く。パネルの移動の順番待ち（goer）に渡し、先に押した移動が終わってから開く。
+   * 何も待っていなければ、押した操作の中で開く。
+   */
+  open: (url: string) => void;
 }
 
 /**
  * 押せるバッジの click と keydown を扱う。行やノードを押す操作（Orca 内へ移動）に伝わらないよう、
- * capture で登録して stopPropagation する。openExternal は操作の直後でないと Orca が断るので、
- * 何も await せずに呼ぶ。
+ * capture で登録して stopPropagation する。開くのは deps.open（移動と同じ順番待ち）に任せる。
  */
 export function ticketHandler(deps: TicketDeps): (event: TicketEvent) => void {
   return (event) => {
@@ -143,21 +143,6 @@ export function ticketHandler(deps: TicketDeps): (event: TicketEvent) => void {
       if (el.tagName === "BUTTON") return;
       event.preventDefault();
     } else event.stopPropagation();
-    if (!deps.openExternal) {
-      deps.report("この Orca ではチケットをブラウザで開けません");
-      return;
-    }
-    deps.openExternal(url).then(
-      (r) =>
-        deps.report(
-          r.opened || r.reason === "cancelled"
-            ? null
-            : `チケットをブラウザで開けませんでした（${r.reason ?? "unknown"}）`,
-        ),
-      (error: unknown) =>
-        deps.report(
-          `チケットをブラウザで開けませんでした（${(error as Error)?.message ?? ""}）`,
-        ),
-    );
+    deps.open(url);
   };
 }

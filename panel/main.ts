@@ -55,17 +55,6 @@ function render(): void {
   errorsEl.innerHTML = renderErrors(errors, lastOkAt, Date.now());
 }
 
-// チケットのバッジ。行やノードを押す操作より先に受けるよう、capture で登録する。
-const onTicket = ticketHandler({
-  openExternal: shell && ((url) => shell.openExternal(url)),
-  report: (text) => {
-    openError = text;
-    render();
-  },
-});
-document.addEventListener("click", onTicket, true);
-document.addEventListener("keydown", onTicket, true);
-
 const go = goer({
   open: (target) => orca.plugin.request("map.open", target),
   openExternal: shell && ((url) => shell.openExternal(url)),
@@ -76,6 +65,14 @@ const go = goer({
     render();
   },
 });
+
+// チケットのバッジ。行やノードを押す操作より先に受けるよう、capture で登録する。
+const onTicket = ticketHandler({
+  // バッジの URL も、行やノードの移動と同じ順番待ちに入れる。
+  open: (url) => void go({ kind: "external", url, what: "チケット" }),
+});
+document.addEventListener("click", onTicket, true);
+document.addEventListener("keydown", onTicket, true);
 
 /** 押された行やノードを開く。 */
 function goTo(event: Event): boolean {

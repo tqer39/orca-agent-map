@@ -170,7 +170,8 @@ function ports(edges: Edge[], placed: Map<string, Placed>) {
 /** 押したときにすること。Orca で開く先があればそこを、無ければリンクをブラウザで開く。 */
 export type GoAction =
   | { kind: "orca"; target: NeedTarget }
-  | { kind: "external"; url: string };
+  /** what は開けなかったときの文言に使う名前（既定は「リンク」、バッジは「チケット」）。 */
+  | { kind: "external"; url: string; what?: string };
 
 /**
  * 実際に開けるものだけを返す（null なら押せる見た目にしない）。デモのデータは Orca に無い

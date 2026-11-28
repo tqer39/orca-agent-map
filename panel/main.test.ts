@@ -175,24 +175,64 @@ test("パネルのクリック: 端末を待つあいだに URL を押すと、�
   // チケットのバッジを押すと、ブラウザでチケットを開き、行の移動（map.open）には伝わらない。
   // バッジは行の開く部分の兄弟だが、仮に開く部分の中にあっても capture で止まることを確かめる。
   const TICKET = "https://example.com/demo/issue/9";
+  /** バッジを押したときの target。tagName は一覧なら BUTTON、図なら g。 */
+  const badge = (tagName: string, insideRow = false) => ({
+    closest: (selector: string) =>
+      selector === "[data-ticket-url]"
+        ? {
+            tagName,
+            getAttribute: (name: string) =>
+              name === "data-ticket-url" ? TICKET : null,
+          }
+        : selector === "[data-go]" && insideRow
+          ? { getAttribute: () => "node:agent-a" }
+          : null,
+  });
   for (const insideRow of [false, true]) {
     events.length = 0;
-    const badge = {
-      tagName: "BUTTON",
-      getAttribute: (name: string) =>
-        name === "data-ticket-url" ? TICKET : null,
-    };
-    dispatch("click", {
-      target: {
-        closest: (selector: string) =>
-          selector === "[data-ticket-url]"
-            ? badge
-            : selector === "[data-go]" && insideRow
-              ? { getAttribute: () => "node:agent-a" }
-              : null,
-      },
-    });
+    dispatch("click", { target: badge("BUTTON", insideRow) });
     await tick();
     assert.deepEqual(events, [`url:${TICKET}`]);
+  }
+
+  // 先の移動（端末の引き当て）を待つあいだにバッジを押しても、先の移動が終わってから開く。
+  // 一覧の button は Enter / Space で click が来る（keydown の後に click を送る）。図のバッジは keydown で開く。
+  const presses: [string, () => void][] = [
+    ["一覧 click", () => dispatch("click", { target: badge("BUTTON") })],
+    ...[
+      ["Enter", "一覧 Enter"],
+      [" ", "一覧 Space"],
+    ].map(
+      ([key, name]) =>
+        [
+          name,
+          () => {
+            dispatch("keydown", { key, target: badge("BUTTON") });
+            dispatch("click", { target: badge("BUTTON") });
+          },
+        ] as [string, () => void],
+    ),
+    ["図 click", () => dispatch("click", { target: badge("g") })],
+    [
+      "図 Enter",
+      () => dispatch("keydown", { key: "Enter", target: badge("g") }),
+    ],
+    ["図 Space", () => dispatch("keydown", { key: " ", target: badge("g") })],
+  ];
+  for (const [name, press] of presses) {
+    events.length = 0;
+    cli = heldCli();
+    click("node:agent-a");
+    press();
+    await tick();
+    assert.deepEqual(events, ["send:map.open"], name);
+    await deliver();
+    cli.answer();
+    await tick();
+    assert.deepEqual(
+      events,
+      ["send:map.open", "host:terminal.focus", `url:${TICKET}`],
+      name,
+    );
   }
 });

@@ -115,7 +115,7 @@ for (const fails of [false, true])
       ]);
       assert.equal(
         w.reports.at(-1),
-        opened ? null : "リンクを開けませんでした",
+        opened ? null : "リンクをブラウザで開けませんでした（unknown）",
       );
     });
 
@@ -259,4 +259,32 @@ test("最後に押した移動が時間切れになったら、そのまま理�
   });
   await go(ws("repo::/a"));
   assert.match(reports.at(-1) ?? "", /Orca で開けませんでした（timeout/);
+});
+
+test("チケットのバッジ: 開けなかったら理由を出し、確認での取り消しは出さず、shell が無ければそう出す", async () => {
+  for (const [result, expected] of [
+    [{ opened: true }, null],
+    [{ opened: false, reason: "cancelled" }, null],
+    [
+      { opened: false, reason: "consent-unavailable" },
+      "チケットをブラウザで開けませんでした（consent-unavailable）",
+    ],
+  ] as const) {
+    const reports: (string | null)[] = [];
+    const go = goer({
+      open: async () => ({ opened: true, pane: false }),
+      openExternal: async () => result,
+      active: () => true,
+      report: (error) => reports.push(error),
+    });
+    await go({ kind: "external", url: URL_B, what: "チケット" });
+    assert.deepEqual(reports, [expected]);
+  }
+  const reports: (string | null)[] = [];
+  await goer({
+    open: async () => ({ opened: true, pane: false }),
+    active: () => true,
+    report: (error) => reports.push(error),
+  })({ kind: "external", url: URL_B, what: "チケット" });
+  assert.deepEqual(reports, ["この Orca ではチケットをブラウザで開けません"]);
 });

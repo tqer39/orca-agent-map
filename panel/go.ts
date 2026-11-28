@@ -10,7 +10,7 @@ export function errorText(error: unknown): string {
 export interface GoDeps {
   /** worker に Orca の中の移動を頼む（map.open）。 */
   open(target: NeedTarget): Promise<OpenResult>;
-  openExternal?(url: string): Promise<{ opened: boolean }>;
+  openExternal?(url: string): Promise<{ opened: boolean; reason?: string }>;
   /** 押した操作がまだ有効か（navigator.userActivation.isActive）。URL はその間しか開けない。 */
   active(): boolean;
   /** 開けなかった理由を出す。null で消す。 */
@@ -71,12 +71,22 @@ export function goer(deps: GoDeps): (action: GoAction) => Promise<void> {
       report(EXPIRED);
       return true;
     }
+    const what = action.what ?? "リンク";
+    if (!deps.openExternal) {
+      report(`この Orca では${what}をブラウザで開けません`);
+      return true;
+    }
     try {
       // 押した直後なら await を挟まずに呼ぶ（shell.openExternal は押した操作の中でしか開けない）。
-      const opened = await deps.openExternal?.(action.url);
-      report(opened?.opened ? null : "リンクを開けませんでした");
+      const r = await deps.openExternal(action.url);
+      // 確認で取り消したのは、利用者が選んだことなので出さない。
+      report(
+        r.opened || r.reason === "cancelled"
+          ? null
+          : `${what}をブラウザで開けませんでした（${r.reason ?? "unknown"}）`,
+      );
     } catch (error) {
-      report(`リンクを開けませんでした（${errorText(error)}）`);
+      report(`${what}をブラウザで開けませんでした（${errorText(error)}）`);
     }
     return true;
   }
